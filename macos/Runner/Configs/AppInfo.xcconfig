@@ -11,4 +11,4 @@ PRODUCT_NAME = filevaultpro
 PRODUCT_BUNDLE_IDENTIFIER = com.svt.filevaultpro
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2025 com.example. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2025 com.svt All rights reserved.

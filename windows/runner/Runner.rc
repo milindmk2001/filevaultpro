@@ -93,7 +93,7 @@ BEGIN
             VALUE "FileDescription", "filevaultpro" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "filevaultpro" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2025 com.example. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2025 com.svt. All rights reserved." "\0"
             VALUE "OriginalFilename", "filevaultpro.exe" "\0"
             VALUE "ProductName", "filevaultpro" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
