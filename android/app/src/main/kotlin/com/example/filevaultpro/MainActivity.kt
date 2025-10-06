@@ -1,4 +1,4 @@
-package com.example.filevaultpro
+package com.svt.filevaultpro
 
 import io.flutter.embedding.android.FlutterActivity
 
