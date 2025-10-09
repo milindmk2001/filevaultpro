@@ -19,6 +19,11 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
   bool _showMediaBrowser = false;
   String _currentPath = '';
   List<FileSystemEntity> _files = [];
+  bool _isLoading = false;
+  
+  // Clipboard for cut/copy/paste
+  FileSystemEntity? _clipboardItem;
+  bool _isCutOperation = false;
 
   @override
   void initState() {
@@ -34,16 +39,363 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
   }
 
   Future<void> _loadFiles(String path) async {
+    setState(() {
+      _isLoading = true;
+    });
+    
     try {
       final dir = Directory(path);
       final List<FileSystemEntity> entities = await dir.list().toList();
+      
+      // Sort: directories first, then files, both alphabetically
+      entities.sort((a, b) {
+        final aIsDir = a is Directory;
+        final bIsDir = b is Directory;
+        
+        if (aIsDir && !bIsDir) return -1;
+        if (!aIsDir && bIsDir) return 1;
+        
+        return a.path.toLowerCase().compareTo(b.path.toLowerCase());
+      });
+      
       setState(() {
         _files = entities;
         _currentPath = path;
+        _isLoading = false;
       });
     } catch (e) {
-      print('Error loading files: $e');
+      setState(() {
+        _isLoading = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading files: $e')),
+        );
+      }
     }
+  }
+
+  Future<void> _goToParentDirectory() async {
+    final parentDir = Directory(_currentPath).parent;
+    if (parentDir.path != _currentPath) {
+      await _loadFiles(parentDir.path);
+    }
+  }
+
+  void _showContextMenu(BuildContext context, FileSystemEntity entity, Offset position) {
+    final isDirectory = entity is Directory;
+    
+    showMenu(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        position.dx + 1,
+        position.dy + 1,
+      ),
+      items: [
+        PopupMenuItem(
+          child: Row(
+            children: const [
+              Icon(Icons.info_outline, size: 20),
+              SizedBox(width: 12),
+              Text('Properties'),
+            ],
+          ),
+          onTap: () => Future.delayed(
+            const Duration(milliseconds: 100),
+            () => _showPropertiesDialog(entity),
+          ),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          child: Row(
+            children: const [
+              Icon(Icons.content_cut, size: 20),
+              SizedBox(width: 12),
+              Text('Cut'),
+            ],
+          ),
+          onTap: () {
+            setState(() {
+              _clipboardItem = entity;
+              _isCutOperation = true;
+            });
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('${_getEntityName(entity)} cut to clipboard')),
+            );
+          },
+        ),
+        PopupMenuItem(
+          child: Row(
+            children: const [
+              Icon(Icons.content_copy, size: 20),
+              SizedBox(width: 12),
+              Text('Copy'),
+            ],
+          ),
+          onTap: () {
+            setState(() {
+              _clipboardItem = entity;
+              _isCutOperation = false;
+            });
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('${_getEntityName(entity)} copied to clipboard')),
+            );
+          },
+        ),
+        if (_clipboardItem != null)
+          PopupMenuItem(
+            child: Row(
+              children: const [
+                Icon(Icons.content_paste, size: 20),
+                SizedBox(width: 12),
+                Text('Paste Here'),
+              ],
+            ),
+            onTap: () => Future.delayed(
+              const Duration(milliseconds: 100),
+              () => _pasteItem(isDirectory ? entity.path : _currentPath),
+            ),
+          ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          child: Row(
+            children: const [
+              Icon(Icons.drive_file_rename_outline, size: 20),
+              SizedBox(width: 12),
+              Text('Rename'),
+            ],
+          ),
+          onTap: () => Future.delayed(
+            const Duration(milliseconds: 100),
+            () => _showRenameDialog(entity),
+          ),
+        ),
+        PopupMenuItem(
+          child: Row(
+            children: const [
+              Icon(Icons.delete_outline, size: 20, color: Colors.red),
+              SizedBox(width: 12),
+              Text('Delete', style: TextStyle(color: Colors.red)),
+            ],
+          ),
+          onTap: () => Future.delayed(
+            const Duration(milliseconds: 100),
+            () => _confirmDelete(entity),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _pasteItem(String destinationPath) async {
+    if (_clipboardItem == null) return;
+    
+    try {
+      final fileName = _getEntityName(_clipboardItem!);
+      final newPath = '$destinationPath/$fileName';
+      
+      if (_isCutOperation) {
+        // Move operation
+        await _clipboardItem!.rename(newPath);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$fileName moved successfully')),
+        );
+      } else {
+        // Copy operation
+        if (_clipboardItem is File) {
+          await File(_clipboardItem!.path).copy(newPath);
+        } else if (_clipboardItem is Directory) {
+          await _copyDirectory(Directory(_clipboardItem!.path), Directory(newPath));
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$fileName copied successfully')),
+        );
+      }
+      
+      setState(() {
+        _clipboardItem = null;
+        _isCutOperation = false;
+      });
+      
+      await _loadFiles(_currentPath);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
+    }
+  }
+
+  Future<void> _copyDirectory(Directory source, Directory destination) async {
+    await destination.create(recursive: true);
+    await for (final entity in source.list(recursive: false)) {
+      if (entity is Directory) {
+        final newDirectory = Directory('${destination.path}/${entity.path.split('/').last}');
+        await _copyDirectory(entity, newDirectory);
+      } else if (entity is File) {
+        await entity.copy('${destination.path}/${entity.path.split('/').last}');
+      }
+    }
+  }
+
+  void _showPropertiesDialog(FileSystemEntity entity) {
+    final isDirectory = entity is Directory;
+    final name = _getEntityName(entity);
+    
+    FileStat stat = FileStat.statSync(entity.path);
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(isDirectory ? Icons.folder : Icons.insert_drive_file),
+            const SizedBox(width: 8),
+            Expanded(child: Text(name)),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildPropertyRow('Type', isDirectory ? 'Folder' : 'File'),
+              _buildPropertyRow('Location', entity.parent.path),
+              if (!isDirectory)
+                _buildPropertyRow('Size', _formatFileSize(stat.size)),
+              _buildPropertyRow('Modified', _formatDate(stat.modified)),
+              _buildPropertyRow('Accessed', _formatDate(stat.accessed)),
+              _buildPropertyRow('Changed', _formatDate(stat.changed)),
+              const Divider(),
+              _buildPropertyRow('Path', entity.path),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPropertyRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 80,
+            child: Text(
+              '$label:',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(color: Colors.grey),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showRenameDialog(FileSystemEntity entity) {
+    final controller = TextEditingController(text: _getEntityName(entity));
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Rename'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            labelText: 'New name',
+            border: OutlineInputBorder(),
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final newName = controller.text.trim();
+              if (newName.isEmpty) return;
+              
+              try {
+                final newPath = '${entity.parent.path}/$newName';
+                await entity.rename(newPath);
+                Navigator.pop(context);
+                await _loadFiles(_currentPath);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Renamed successfully')),
+                );
+              } catch (e) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Error: $e')),
+                );
+              }
+            },
+            child: const Text('Rename'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmDelete(FileSystemEntity entity) {
+    final name = _getEntityName(entity);
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete'),
+        content: Text('Are you sure you want to delete "$name"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              try {
+                await entity.delete(recursive: true);
+                Navigator.pop(context);
+                await _loadFiles(_currentPath);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('$name deleted')),
+                );
+              } catch (e) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Error: $e')),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _getEntityName(FileSystemEntity entity) {
+    return entity.path.split('/').last;
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.day}/${date.month}/${date.year} ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
   }
 
   @override
@@ -76,7 +428,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
                     ),
                     const SizedBox(height: 16),
                     
-                    // Search Bar
                     CupertinoSearchTextField(
                       controller: _searchController,
                       placeholder: 'Search files and folders...',
@@ -88,7 +439,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
                     ),
                     const SizedBox(height: 24),
                     
-                    // Quick Access
                     Text(
                       'Quick Access',
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -105,7 +455,10 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
                             '124 files',
                             'Last updated: Oct 26, 2023',
                             Icons.folder,
-                            () => setState(() => _showFileBrowser = true),
+                            () async {
+                              setState(() => _showFileBrowser = true);
+                              await _loadFiles(_currentPath);
+                            },
                           ),
                         ),
                         const SizedBox(width: 16),
@@ -122,7 +475,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
                     ),
                     const SizedBox(height: 32),
                     
-                    // Recent Files
                     Text(
                       'Recent Files',
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -152,7 +504,9 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         onPressed: () async {
           FilePickerResult? result = await FilePicker.platform.pickFiles();
           if (result != null) {
-            // Handle file selection
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Selected: ${result.files.first.name}')),
+            );
           }
         },
         backgroundColor: const Color(0xFF1976D2),
@@ -168,52 +522,211 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('File Browser'),
+            const Text('File Browser', style: TextStyle(fontSize: 18)),
             Text(
-              _currentPath,
+              _currentPath.length > 40 
+                ? '...${_currentPath.substring(_currentPath.length - 40)}'
+                : _currentPath,
               style: const TextStyle(fontSize: 12, color: Colors.grey),
             ),
           ],
         ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => setState(() => _showFileBrowser = false),
+          onPressed: () => setState(() {
+            _showFileBrowser = false;
+            _files.clear();
+          }),
         ),
+        actions: [
+          if (_currentPath.isNotEmpty && Directory(_currentPath).parent.path != _currentPath)
+            IconButton(
+              icon: const Icon(Icons.arrow_upward),
+              tooltip: 'Parent Directory',
+              onPressed: _goToParentDirectory,
+            ),
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh',
+            onPressed: () => _loadFiles(_currentPath),
+          ),
+          if (_clipboardItem != null)
+            IconButton(
+              icon: Icon(
+                _isCutOperation ? Icons.content_cut : Icons.content_copy,
+                color: Colors.orange,
+              ),
+              tooltip: 'Paste',
+              onPressed: () => _pasteItem(_currentPath),
+            ),
+        ],
       ),
-      body: FutureBuilder(
-        future: _loadFiles(_currentPath),
-        builder: (context, snapshot) {
-          return ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: _files.length,
-            itemBuilder: (context, index) {
-              final file = _files[index];
-              final isDirectory = file is Directory;
-              return Card(
-                margin: const EdgeInsets.only(bottom: 8),
-                child: ListTile(
-                  leading: Icon(
-                    isDirectory ? Icons.folder : Icons.insert_drive_file,
-                    color: isDirectory ? const Color(0xFF1976D2) : Colors.grey,
-                    size: 32,
+      body: _isLoading
+        ? const Center(child: CircularProgressIndicator())
+        : _files.isEmpty
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.folder_open, size: 64, color: Colors.grey[400]),
+                  const SizedBox(height: 16),
+                  Text(
+                    'This folder is empty',
+                    style: TextStyle(color: Colors.grey[600]),
                   ),
-                  title: Text(file.path.split('/').last),
-                  subtitle: !isDirectory
-                      ? Text(_formatFileSize(File(file.path).lengthSync()))
-                      : null,
-                  trailing: isDirectory
-                      ? const Icon(Icons.chevron_right, color: Colors.grey)
-                      : null,
-                  onTap: isDirectory
-                      ? () => _loadFiles(file.path)
-                      : null,
-                ),
-              );
-            },
-          );
-        },
+                ],
+              ),
+            )
+          : ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: _files.length,
+              itemBuilder: (context, index) {
+                final file = _files[index];
+                final isDirectory = file is Directory;
+                final fileName = _getEntityName(file);
+                
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  child: ListTile(
+                    leading: Icon(
+                      isDirectory ? Icons.folder : _getFileIcon(fileName),
+                      color: isDirectory ? const Color(0xFF1976D2) : Colors.grey,
+                      size: 32,
+                    ),
+                    title: Text(fileName),
+                    subtitle: !isDirectory
+                        ? FutureBuilder<FileStat>(
+                            future: file.stat(),
+                            builder: (context, snapshot) {
+                              if (snapshot.hasData) {
+                                return Text(
+                                  '${_formatFileSize(snapshot.data!.size)} • ${_formatDate(snapshot.data!.modified)}',
+                                  style: const TextStyle(fontSize: 12),
+                                );
+                              }
+                              return const Text('Loading...');
+                            },
+                          )
+                        : const Text('Folder'),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (isDirectory)
+                          const Icon(Icons.chevron_right, color: Colors.grey),
+                        IconButton(
+                          icon: const Icon(Icons.more_vert, size: 20),
+                          onPressed: () {
+                            final RenderBox button = context.findRenderObject() as RenderBox;
+                            final RenderBox overlay = Navigator.of(context).overlay!.context.findRenderObject() as RenderBox;
+                            final RelativeRect position = RelativeRect.fromRect(
+                              Rect.fromPoints(
+                                button.localToGlobal(Offset.zero, ancestor: overlay),
+                                button.localToGlobal(button.size.bottomRight(Offset.zero), ancestor: overlay),
+                              ),
+                              Offset.zero & overlay.size,
+                            );
+                            _showContextMenu(
+                              context, 
+                              file, 
+                              Offset(position.right, position.top),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                    onTap: isDirectory ? () => _loadFiles(file.path) : null,
+                    onLongPress: () {
+                      final RenderBox box = context.findRenderObject() as RenderBox;
+                      final Offset position = box.localToGlobal(Offset.zero);
+                      _showContextMenu(context, file, position);
+                    },
+                  ),
+                );
+              },
+            ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _showNewFolderDialog(),
+        backgroundColor: const Color(0xFF1976D2),
+        child: const Icon(Icons.create_new_folder, color: Colors.white),
       ),
     );
+  }
+
+  void _showNewFolderDialog() {
+    final controller = TextEditingController();
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('New Folder'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            labelText: 'Folder name',
+            border: OutlineInputBorder(),
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final name = controller.text.trim();
+              if (name.isEmpty) return;
+              
+              try {
+                final newDir = Directory('$_currentPath/$name');
+                await newDir.create();
+                Navigator.pop(context);
+                await _loadFiles(_currentPath);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Folder "$name" created')),
+                );
+              } catch (e) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Error: $e')),
+                );
+              }
+            },
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  IconData _getFileIcon(String fileName) {
+    final ext = fileName.split('.').last.toLowerCase();
+    switch (ext) {
+      case 'pdf':
+        return Icons.picture_as_pdf;
+      case 'jpg':
+      case 'jpeg':
+      case 'png':
+      case 'gif':
+        return Icons.image;
+      case 'mp4':
+      case 'mov':
+      case 'avi':
+        return Icons.video_file;
+      case 'mp3':
+      case 'wav':
+      case 'aac':
+        return Icons.audio_file;
+      case 'doc':
+      case 'docx':
+      case 'txt':
+        return Icons.description;
+      case 'zip':
+      case 'rar':
+        return Icons.archive;
+      default:
+        return Icons.insert_drive_file;
+    }
   }
 
   Widget _buildMediaBrowser() {
@@ -327,5 +840,11 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
     if (bytes < 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 }

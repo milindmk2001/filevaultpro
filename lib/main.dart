@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:provider/provider.dart';
 import 'screens/file_explorer_screen.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/analytics_screen.dart';

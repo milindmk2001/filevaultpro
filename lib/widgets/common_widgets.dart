@@ -16,13 +16,13 @@ class CommonWidgets {
                   fontWeight: FontWeight.w500,
                 ),
               ),
-              Row(
+              const Row(
                 children: [
-                  const Icon(Icons.signal_cellular_4_bar, size: 16),
-                  const SizedBox(width: 4),
-                  const Icon(Icons.wifi, size: 16),
-                  const SizedBox(width: 4),
-                  const Icon(Icons.battery_full, size: 16),
+                  Icon(Icons.signal_cellular_4_bar, size: 16),
+                  SizedBox(width: 4),
+                  Icon(Icons.wifi, size: 16),
+                  SizedBox(width: 4),
+                  Icon(Icons.battery_full, size: 16),
                 ],
               ),
             ],
