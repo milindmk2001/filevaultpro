@@ -85,7 +85,7 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
   void _showContextMenu(BuildContext context, FileSystemEntity entity, Offset position) {
     final isDirectory = entity is Directory;
     
-    showMenu(
+    showMenu<String>(
       context: context,
       position: RelativeRect.fromLTRB(
         position.dx,
@@ -93,30 +93,78 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         position.dx + 1,
         position.dy + 1,
       ),
-      items: [
-        PopupMenuItem(
+      items: <PopupMenuEntry<String>>[
+        const PopupMenuItem<String>(
+          value: 'properties',
           child: Row(
-            children: const [
+            children: [
               Icon(Icons.info_outline, size: 20),
               SizedBox(width: 12),
               Text('Properties'),
             ],
           ),
-          onTap: () => Future.delayed(
-            const Duration(milliseconds: 100),
-            () => _showPropertiesDialog(entity),
-          ),
         ),
         const PopupMenuDivider(),
-        PopupMenuItem(
+        const PopupMenuItem<String>(
+          value: 'cut',
           child: Row(
-            children: const [
+            children: [
               Icon(Icons.content_cut, size: 20),
               SizedBox(width: 12),
               Text('Cut'),
             ],
           ),
-          onTap: () {
+        ),
+        const PopupMenuItem<String>(
+          value: 'copy',
+          child: Row(
+            children: [
+              Icon(Icons.content_copy, size: 20),
+              SizedBox(width: 12),
+              Text('Copy'),
+            ],
+          ),
+        ),
+        if (_clipboardItem != null)
+          const PopupMenuItem<String>(
+            value: 'paste',
+            child: Row(
+              children: [
+                Icon(Icons.content_paste, size: 20),
+                SizedBox(width: 12),
+                Text('Paste Here'),
+              ],
+            ),
+          ),
+        const PopupMenuDivider(),
+        const PopupMenuItem<String>(
+          value: 'rename',
+          child: Row(
+            children: [
+              Icon(Icons.drive_file_rename_outline, size: 20),
+              SizedBox(width: 12),
+              Text('Rename'),
+            ],
+          ),
+        ),
+        const PopupMenuItem<String>(
+          value: 'delete',
+          child: Row(
+            children: [
+              Icon(Icons.delete_outline, size: 20, color: Colors.red),
+              SizedBox(width: 12),
+              Text('Delete', style: TextStyle(color: Colors.red)),
+            ],
+          ),
+        ),
+      ],
+    ).then((value) {
+      if (value != null) {
+        switch (value) {
+          case 'properties':
+            _showPropertiesDialog(entity);
+            break;
+          case 'cut':
             setState(() {
               _clipboardItem = entity;
               _isCutOperation = true;
@@ -124,17 +172,8 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text('${_getEntityName(entity)} cut to clipboard')),
             );
-          },
-        ),
-        PopupMenuItem(
-          child: Row(
-            children: const [
-              Icon(Icons.content_copy, size: 20),
-              SizedBox(width: 12),
-              Text('Copy'),
-            ],
-          ),
-          onTap: () {
+            break;
+          case 'copy':
             setState(() {
               _clipboardItem = entity;
               _isCutOperation = false;
@@ -142,51 +181,19 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text('${_getEntityName(entity)} copied to clipboard')),
             );
-          },
-        ),
-        if (_clipboardItem != null)
-          PopupMenuItem(
-            child: Row(
-              children: const [
-                Icon(Icons.content_paste, size: 20),
-                SizedBox(width: 12),
-                Text('Paste Here'),
-              ],
-            ),
-            onTap: () => Future.delayed(
-              const Duration(milliseconds: 100),
-              () => _pasteItem(isDirectory ? entity.path : _currentPath),
-            ),
-          ),
-        const PopupMenuDivider(),
-        PopupMenuItem(
-          child: Row(
-            children: const [
-              Icon(Icons.drive_file_rename_outline, size: 20),
-              SizedBox(width: 12),
-              Text('Rename'),
-            ],
-          ),
-          onTap: () => Future.delayed(
-            const Duration(milliseconds: 100),
-            () => _showRenameDialog(entity),
-          ),
-        ),
-        PopupMenuItem(
-          child: Row(
-            children: const [
-              Icon(Icons.delete_outline, size: 20, color: Colors.red),
-              SizedBox(width: 12),
-              Text('Delete', style: TextStyle(color: Colors.red)),
-            ],
-          ),
-          onTap: () => Future.delayed(
-            const Duration(milliseconds: 100),
-            () => _confirmDelete(entity),
-          ),
-        ),
-      ],
-    );
+            break;
+          case 'paste':
+            _pasteItem(isDirectory ? entity.path : _currentPath);
+            break;
+          case 'rename':
+            _showRenameDialog(entity);
+            break;
+          case 'delete':
+            _confirmDelete(entity);
+            break;
+        }
+      }
+    });
   }
 
   Future<void> _pasteItem(String destinationPath) async {
@@ -616,20 +623,9 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
                         IconButton(
                           icon: const Icon(Icons.more_vert, size: 20),
                           onPressed: () {
-                            final RenderBox button = context.findRenderObject() as RenderBox;
-                            final RenderBox overlay = Navigator.of(context).overlay!.context.findRenderObject() as RenderBox;
-                            final RelativeRect position = RelativeRect.fromRect(
-                              Rect.fromPoints(
-                                button.localToGlobal(Offset.zero, ancestor: overlay),
-                                button.localToGlobal(button.size.bottomRight(Offset.zero), ancestor: overlay),
-                              ),
-                              Offset.zero & overlay.size,
-                            );
-                            _showContextMenu(
-                              context, 
-                              file, 
-                              Offset(position.right, position.top),
-                            );
+                            final RenderBox box = context.findRenderObject() as RenderBox;
+                            final Offset position = box.localToGlobal(Offset.zero);
+                            _showContextMenu(context, file, position);
                           },
                         ),
                       ],
