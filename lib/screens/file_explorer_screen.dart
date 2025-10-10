@@ -129,258 +129,209 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     }
   }
 
-  // NEW: Smart Folder Import - Select folder and auto-compress
+  // UPDATED: Smart Folder Import with Bulk Instructions
   Future<void> _smartFolderImport() async {
-    try {
-      setState(() => _isImporting = true);
-      
-      // Show instructions dialog first
-      final shouldContinue = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Row(
-            children: [
-              Icon(Icons.folder_special, color: Color(0xFF4CAF50)),
-              SizedBox(width: 8),
-              Text('Smart Folder Import'),
-            ],
-          ),
-          content: const Column(
+    final action = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.folder_special, color: Color(0xFF4CAF50)),
+            SizedBox(width: 8),
+            Expanded(child: Text('Smart Folder Import')),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'How it works:',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF3E0),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFFF9800)),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.info_outline, color: Color(0xFFFF9800)),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'iOS doesn\'t allow direct folder selection',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              SizedBox(height: 12),
-              Text('1️⃣ You\'ll select a folder from Files app'),
-              SizedBox(height: 8),
-              Text('2️⃣ App will automatically compress it'),
-              SizedBox(height: 8),
-              Text('3️⃣ Import with full folder structure'),
-              SizedBox(height: 16),
-              Text(
-                '✨ Completely automatic!',
+              const SizedBox(height: 16),
+              
+              // OPTION 1: Single Folder
+              const Text(
+                '📁 For Single Folder:',
                 style: TextStyle(
-                  color: Color(0xFF4CAF50),
                   fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                  color: Color(0xFF1976D2),
+                ),
+              ),
+              const SizedBox(height: 8),
+              _buildInstructionStep('1', 'Open iOS Files App', Icons.folder),
+              const SizedBox(height: 6),
+              _buildInstructionStep('2', 'Long-press the folder', Icons.touch_app),
+              const SizedBox(height: 6),
+              _buildInstructionStep('3', 'Tap "Compress"', Icons.archive),
+              
+              const SizedBox(height: 16),
+              const Divider(),
+              const SizedBox(height: 16),
+              
+              // OPTION 2: Multiple Folders (BULK)
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE8F5E9),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFF4CAF50), width: 2),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.stars, color: Color(0xFF4CAF50)),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '📦 For Multiple Folders (BULK):',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                              color: Color(0xFF4CAF50),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    _buildInstructionStep('1', 'Open Files App', Icons.folder_open),
+                    const SizedBox(height: 6),
+                    _buildInstructionStep('2', 'Go to "On My iPhone"', Icons.phone_iphone),
+                    const SizedBox(height: 6),
+                    _buildInstructionStep('3', 'Tap "Select" (top-right)', Icons.check_circle_outline),
+                    const SizedBox(height: 6),
+                    _buildInstructionStep('4', 'Tap "Select All" or pick folders', Icons.select_all),
+                    const SizedBox(height: 6),
+                    _buildInstructionStep('5', 'Tap share icon (bottom)', Icons.ios_share),
+                    const SizedBox(height: 6),
+                    _buildInstructionStep('6', 'Tap "Compress"', Icons.archive),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Text(
+                        '✨ Creates one ZIP with all selected folders!',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontStyle: FontStyle.italic,
+                          color: Color(0xFF4CAF50),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE3F2FD),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '🎯 Then come back here:',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1976D2),
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'Tap "Import ZIP" below to import everything at once!',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF4CAF50),
-              ),
-              child: const Text('Select Folder'),
-            ),
-          ],
-        ),
-      );
-      
-      if (shouldContinue != true) {
-        setState(() => _isImporting = false);
-        return;
-      }
-      
-      // Try to get directory path
-      final directoryPath = await FilePicker.platform.getDirectoryPath();
-      
-      if (directoryPath != null) {
-        // Successfully got folder - compress and import it
-        await _compressAndImportFolder(directoryPath);
-      } else {
-        // Folder picker not supported or cancelled
-        if (mounted) {
-          _showFolderImportFallbackDialog();
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
-      }
-    } finally {
-      setState(() => _isImporting = false);
-    }
-  }
-
-  void _showFolderImportFallbackDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('iOS Folder Access'),
-        content: const Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'iOS has limited folder access. Here\'s the easy workaround:',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            SizedBox(height: 16),
-            Text('📱 In iOS Files App:'),
-            SizedBox(height: 8),
-            Text('1. Find your folder'),
-            Text('2. Long-press the folder'),
-            Text('3. Tap "Compress"'),
-            Text('4. Returns here'),
-            SizedBox(height: 16),
-            Text('📦 In FilevaultPro:'),
-            SizedBox(height: 8),
-            Text('5. Tap "Import ZIP File"'),
-            Text('6. Select the compressed folder'),
-            SizedBox(height: 16),
-            Text(
-              '✨ Done! Full folder structure preserved',
-              style: TextStyle(
-                color: Color(0xFF4CAF50),
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Got it'),
+            onPressed: () => Navigator.pop(context, 'cancel'),
+            child: const Text('Cancel'),
           ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _importZipFile();
-            },
-            child: const Text('Go to Import ZIP'),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.pop(context, 'import_zip'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF4CAF50),
+            ),
+            icon: const Icon(Icons.folder_zip),
+            label: const Text('Go to Import ZIP'),
           ),
         ],
       ),
     );
+
+    if (action == 'import_zip') {
+      _importZipFile();
+    }
   }
 
-  Future<void> _compressAndImportFolder(String folderPath) async {
-    try {
-      final folderDir = Directory(folderPath);
-      final folderName = folderPath.split('/').last;
-      
-      // Show progress
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Compressing "$folderName"...'),
-            duration: const Duration(seconds: 2),
+  Widget _buildInstructionStep(String number, String text, IconData icon) {
+    return Row(
+      children: [
+        Container(
+          width: 28,
+          height: 28,
+          decoration: const BoxDecoration(
+            color: Color(0xFF4CAF50),
+            shape: BoxShape.circle,
           ),
-        );
-      }
-      
-      // Create archive from folder
-      final archive = Archive();
-      await _addDirectoryToArchive(archive, folderPath, folderPath);
-      
-      if (archive.files.isEmpty) {
-        throw Exception('Folder is empty or inaccessible');
-      }
-      
-      // Compress
-      final zipData = ZipEncoder().encode(archive);
-      if (zipData == null) {
-        throw Exception('Failed to compress folder');
-      }
-      
-      // Ask what to do with compressed folder
-      final action = await showDialog<String>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Folder Compressed!'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Compressed "$folderName"'),
-              Text('${archive.files.length} items'),
-              const SizedBox(height: 16),
-              const Text('What would you like to do?'),
-            ],
+          child: Center(
+            child: Text(
+              number,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+              ),
+            ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, 'extract'),
-              child: const Text('Import Now (Extract)'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context, 'save'),
-              child: const Text('Save as ZIP'),
-            ),
-          ],
         ),
-      );
-      
-      if (action == 'extract') {
-        // Extract to current location
-        final docDir = await getApplicationDocumentsDirectory();
-        final targetDir = _currentNode?.path ?? docDir.path;
-        
-        int fileCount = 0;
-        int folderCount = 0;
-        
-        for (final file in archive.files) {
-          final filename = file.name;
-          final filePath = '$targetDir/$filename';
-          
-          if (file.isFile) {
-            final outFile = File(filePath);
-            await outFile.create(recursive: true);
-            await outFile.writeAsBytes(file.content as List<int>);
-            fileCount++;
-          } else {
-            await Directory(filePath).create(recursive: true);
-            folderCount++;
-          }
-        }
-        
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Imported "$folderName"\n$fileCount files, $folderCount folders'),
-              duration: const Duration(seconds: 3),
-            ),
-          );
-          
-          if (_currentNode?.path != null) {
-            _navigateToNode(_currentNode!, addToBreadcrumb: false);
-          }
-        }
-      } else if (action == 'save') {
-        // Save ZIP file
-        final docDir = await getApplicationDocumentsDirectory();
-        final targetDir = _currentNode?.path ?? docDir.path;
-        final zipPath = '$targetDir/$folderName.zip';
-        await File(zipPath).writeAsBytes(zipData);
-        
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Saved as $folderName.zip')),
-          );
-          
-          if (_currentNode?.path != null) {
-            _navigateToNode(_currentNode!, addToBreadcrumb: false);
-          }
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
-      }
-    }
+        const SizedBox(width: 10),
+        Icon(icon, color: Colors.grey[600], size: 18),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            text,
+            style: const TextStyle(fontSize: 13),
+          ),
+        ),
+      ],
+    );
   }
 
   Future<void> _importAndAutoOrganize() async {
@@ -1636,7 +1587,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
                       ),
                     ),
                     
-                    // NEW: Smart Folder Import - HIGHLIGHTED at TOP
                     Container(
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
@@ -1661,7 +1611,7 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
                           ),
                         ),
                         subtitle: const Text(
-                          'SELECT FOLDER → Auto-compress → Import\n⭐ Best for importing complete folders!',
+                          'Easy guide: Single folder OR bulk import multiple!\n⭐ Includes "Select All" method',
                           style: TextStyle(fontSize: 12),
                         ),
                         trailing: const Icon(Icons.stars, color: Color(0xFFFFB300), size: 28),
