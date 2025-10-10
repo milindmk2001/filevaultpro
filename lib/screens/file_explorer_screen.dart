@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:file_picker/file_picker.dart';
 import 'dart:io';
 import '../models/file_system_models.dart';
 import '../widgets/common_widgets.dart';
@@ -18,6 +19,7 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
   List<BreadcrumbItem> _breadcrumbs = [];
   FileSystemNode? _currentNode;
   bool _isGridView = false;
+  bool _isImporting = false;
   
   // Clipboard for cut/copy/paste
   FileSystemEntity? _clipboardItem;
@@ -129,6 +131,179 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     } catch (e) {
       debugPrint('Error loading directory contents: $e');
       return [];
+    }
+  }
+
+  // NEW: Import files from anywhere in iOS
+  Future<void> _importFiles() async {
+    try {
+      setState(() => _isImporting = true);
+      
+      final result = await FilePicker.platform.pickFiles(
+        allowMultiple: true,
+        type: FileType.any,
+        withData: false, // We'll copy files instead of loading into memory
+        allowCompression: false,
+      );
+      
+      if (result != null && result.files.isNotEmpty) {
+        await _copyFilesToDocuments(result.files);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error importing files: $e')),
+        );
+      }
+    } finally {
+      setState(() => _isImporting = false);
+    }
+  }
+
+  // NEW: Import a folder (iOS has limited support, but we can try)
+  Future<void> _importFolder() async {
+    try {
+      setState(() => _isImporting = true);
+      
+      final result = await FilePicker.platform.getDirectoryPath();
+      
+      if (result != null) {
+        await _copyDirectoryToDocuments(result);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Note: iOS has limited folder access. Try importing individual files instead.'),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error importing folder: $e')),
+        );
+      }
+    } finally {
+      setState(() => _isImporting = false);
+    }
+  }
+
+  // NEW: Copy picked files to Documents directory
+  Future<void> _copyFilesToDocuments(List<PlatformFile> files) async {
+    try {
+      final docDir = await getApplicationDocumentsDirectory();
+      final targetDir = _currentNode?.path ?? docDir.path;
+      
+      int successCount = 0;
+      int failCount = 0;
+      
+      for (final file in files) {
+        if (file.path == null) {
+          failCount++;
+          continue;
+        }
+        
+        try {
+          final sourceFile = File(file.path!);
+          final targetPath = '$targetDir/${file.name}';
+          
+          // Check if file already exists
+          if (await File(targetPath).exists()) {
+            // Add timestamp to make it unique
+            final timestamp = DateTime.now().millisecondsSinceEpoch;
+            final nameParts = file.name.split('.');
+            final ext = nameParts.length > 1 ? nameParts.last : '';
+            final baseName = nameParts.length > 1 
+                ? nameParts.sublist(0, nameParts.length - 1).join('.')
+                : file.name;
+            final uniqueName = ext.isNotEmpty 
+                ? '${baseName}_$timestamp.$ext'
+                : '${baseName}_$timestamp';
+            final uniquePath = '$targetDir/$uniqueName';
+            await sourceFile.copy(uniquePath);
+          } else {
+            await sourceFile.copy(targetPath);
+          }
+          
+          successCount++;
+        } catch (e) {
+          debugPrint('Error copying file ${file.name}: $e');
+          failCount++;
+        }
+      }
+      
+      if (mounted) {
+        String message = 'Imported $successCount file${successCount != 1 ? 's' : ''}';
+        if (failCount > 0) {
+          message += ' ($failCount failed)';
+        }
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message)),
+        );
+        
+        // Refresh current directory
+        if (_currentNode?.path != null) {
+          _navigateToNode(_currentNode!, addToBreadcrumb: false);
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    }
+  }
+
+  // NEW: Copy directory to Documents
+  Future<void> _copyDirectoryToDocuments(String sourcePath) async {
+    try {
+      final docDir = await getApplicationDocumentsDirectory();
+      final targetDir = _currentNode?.path ?? docDir.path;
+      
+      final sourceDir = Directory(sourcePath);
+      final folderName = sourcePath.split('/').last;
+      final targetPath = '$targetDir/$folderName';
+      
+      // Create target directory
+      final newDir = Directory(targetPath);
+      await newDir.create(recursive: true);
+      
+      // Copy contents recursively
+      await _copyDirectoryContents(sourceDir, newDir);
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Folder "$folderName" imported successfully')),
+        );
+        
+        // Refresh current directory
+        if (_currentNode?.path != null) {
+          _navigateToNode(_currentNode!, addToBreadcrumb: false);
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _copyDirectoryContents(Directory source, Directory target) async {
+    await for (final entity in source.list()) {
+      final name = entity.path.split('/').last;
+      
+      if (entity is File) {
+        await entity.copy('${target.path}/$name');
+      } else if (entity is Directory) {
+        final newDir = Directory('${target.path}/$name');
+        await newDir.create();
+        await _copyDirectoryContents(entity, newDir);
+      }
     }
   }
 
@@ -640,11 +815,22 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
             
             // File/Folder List or Grid
             Expanded(
-              child: _currentNode == null
-                  ? const Center(child: CircularProgressIndicator())
-                  : _isGridView
-                      ? _buildGridView()
-                      : _buildListView(),
+              child: _isImporting
+                  ? const Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          CircularProgressIndicator(),
+                          SizedBox(height: 16),
+                          Text('Importing files...'),
+                        ],
+                      ),
+                    )
+                  : _currentNode == null
+                      ? const Center(child: CircularProgressIndicator())
+                      : _isGridView
+                          ? _buildGridView()
+                          : _buildListView(),
             ),
           ],
         ),
@@ -781,6 +967,25 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            ListTile(
+              leading: const Icon(Icons.file_upload, color: Color(0xFF1976D2)),
+              title: const Text('Import Files'),
+              subtitle: const Text('From iCloud Drive, Files app, etc.'),
+              onTap: () {
+                Navigator.pop(context);
+                _importFiles();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.drive_folder_upload, color: Color(0xFF1976D2)),
+              title: const Text('Import Folder'),
+              subtitle: const Text('iOS has limited folder support'),
+              onTap: () {
+                Navigator.pop(context);
+                _importFolder();
+              },
+            ),
+            const Divider(),
             ListTile(
               leading: const Icon(Icons.create_new_folder),
               title: const Text('New Folder'),
