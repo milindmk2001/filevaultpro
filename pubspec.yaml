@@ -2,7 +2,7 @@ name: filevaultpro
 description: A Flutter-based file management and security app.
 publish_to: "none" # Prevent accidental publishing
 
-version: 1.0.0+2
+version: 1.0.0+3
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
