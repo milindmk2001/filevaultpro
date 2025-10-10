@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:archive/archive.dart';
 import 'dart:io';
 import '../models/file_system_models.dart';
 import '../widgets/common_widgets.dart';
@@ -21,7 +22,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
   bool _isGridView = false;
   bool _isImporting = false;
   
-  // Clipboard for cut/copy/paste
   FileSystemEntity? _clipboardItem;
   bool _isCutOperation = false;
 
@@ -39,8 +39,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         BreadcrumbItem(name: 'Files', depth: 0),
       ];
     });
-    
-    // Load real file system data for accessible directories
     await _loadOnMyIPhoneData();
   }
 
@@ -50,7 +48,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
       final libDir = await getApplicationSupportDirectory();
       final tempDir = await getTemporaryDirectory();
       
-      // Find On My iPhone node and populate it
       final onMyIPhoneIndex = _rootNode.children.indexWhere(
         (node) => node.category == RootCategory.onMyIPhone
       );
@@ -94,7 +91,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     try {
       final dir = Directory(path);
       final entities = await dir.list().toList();
-      
       final nodes = <FileSystemNode>[];
       
       for (final entity in entities) {
@@ -120,7 +116,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         ));
       }
       
-      // Sort: directories first, then files
       nodes.sort((a, b) {
         if (a.isDirectory && !b.isDirectory) return -1;
         if (!a.isDirectory && b.isDirectory) return 1;
@@ -134,7 +129,414 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     }
   }
 
-  // NEW: Import files from anywhere in iOS
+  Future<void> _importAndAutoOrganize() async {
+    try {
+      setState(() => _isImporting = true);
+      
+      final result = await FilePicker.platform.pickFiles(
+        allowMultiple: true,
+        type: FileType.any,
+        withData: false,
+      );
+      
+      if (result != null && result.files.isNotEmpty) {
+        await _showOrganizeFolderDialog(result.files);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    } finally {
+      setState(() => _isImporting = false);
+    }
+  }
+
+  Future<void> _showOrganizeFolderDialog(List<PlatformFile> files) async {
+    final controller = TextEditingController(
+      text: 'Imported_${DateTime.now().millisecondsSinceEpoch}',
+    );
+    
+    final shouldOrganize = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Organize Files'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Found ${files.length} files'),
+            const SizedBox(height: 16),
+            const Text('Create a folder to organize them?'),
+            const SizedBox(height: 8),
+            TextField(
+              controller: controller,
+              decoration: const InputDecoration(
+                labelText: 'Folder name',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Import Without Folder'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Create Folder'),
+          ),
+        ],
+      ),
+    );
+    
+    if (shouldOrganize == true) {
+      final folderName = controller.text.trim();
+      if (folderName.isNotEmpty) {
+        await _importFilesIntoNewFolder(files, folderName);
+        return;
+      }
+    }
+    
+    await _copyFilesToDocuments(files);
+  }
+
+  Future<void> _importFilesIntoNewFolder(
+    List<PlatformFile> files,
+    String folderName,
+  ) async {
+    try {
+      final docDir = await getApplicationDocumentsDirectory();
+      final targetDir = _currentNode?.path ?? docDir.path;
+      
+      final newFolder = Directory('$targetDir/$folderName');
+      await newFolder.create(recursive: true);
+      
+      int successCount = 0;
+      int failCount = 0;
+      
+      for (final file in files) {
+        if (file.path == null) {
+          failCount++;
+          continue;
+        }
+        
+        try {
+          final sourceFile = File(file.path!);
+          final targetPath = '${newFolder.path}/${file.name}';
+          
+          if (await File(targetPath).exists()) {
+            final timestamp = DateTime.now().millisecondsSinceEpoch;
+            final nameParts = file.name.split('.');
+            final ext = nameParts.length > 1 ? nameParts.last : '';
+            final baseName = nameParts.length > 1 
+                ? nameParts.sublist(0, nameParts.length - 1).join('.')
+                : file.name;
+            final uniqueName = ext.isNotEmpty 
+                ? '${baseName}_$timestamp.$ext'
+                : '${baseName}_$timestamp';
+            await sourceFile.copy('${newFolder.path}/$uniqueName');
+          } else {
+            await sourceFile.copy(targetPath);
+          }
+          
+          successCount++;
+        } catch (e) {
+          debugPrint('Error copying file ${file.name}: $e');
+          failCount++;
+        }
+      }
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Created "$folderName" with $successCount files'
+              '${failCount > 0 ? ' ($failCount failed)' : ''}',
+            ),
+          ),
+        );
+        
+        if (_currentNode?.path != null) {
+          _navigateToNode(_currentNode!, addToBreadcrumb: false);
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _createZipFromMultipleFiles() async {
+    try {
+      setState(() => _isImporting = true);
+      
+      final result = await FilePicker.platform.pickFiles(
+        allowMultiple: true,
+        type: FileType.any,
+        withData: false,
+      );
+      
+      if (result != null && result.files.isNotEmpty) {
+        await _compressFilesToZip(result.files);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    } finally {
+      setState(() => _isImporting = false);
+    }
+  }
+
+  Future<void> _compressFilesToZip(List<PlatformFile> files) async {
+    try {
+      final archive = Archive();
+      
+      for (final file in files) {
+        if (file.path == null) continue;
+        
+        try {
+          final fileBytes = await File(file.path!).readAsBytes();
+          final archiveFile = ArchiveFile(file.name, fileBytes.length, fileBytes);
+          archive.addFile(archiveFile);
+        } catch (e) {
+          debugPrint('Error adding ${file.name} to archive: $e');
+        }
+      }
+      
+      if (archive.files.isEmpty) {
+        throw Exception('No files could be added to archive');
+      }
+      
+      final zipData = ZipEncoder().encode(archive);
+      if (zipData == null) {
+        throw Exception('Failed to create ZIP file');
+      }
+      
+      final action = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('ZIP Created'),
+          content: Text('Compressed ${archive.files.length} files\n\nWhat do you want to do?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'extract'),
+              child: const Text('Extract Here'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'save'),
+              child: const Text('Save ZIP File'),
+            ),
+          ],
+        ),
+      );
+      
+      if (action == 'extract') {
+        final docDir = await getApplicationDocumentsDirectory();
+        final targetDir = _currentNode?.path ?? docDir.path;
+        
+        int fileCount = 0;
+        for (final file in archive.files) {
+          if (file.isFile) {
+            final filePath = '$targetDir/${file.name}';
+            final outFile = File(filePath);
+            await outFile.create(recursive: true);
+            await outFile.writeAsBytes(file.content as List<int>);
+            fileCount++;
+          }
+        }
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Extracted $fileCount files')),
+          );
+          
+          if (_currentNode?.path != null) {
+            _navigateToNode(_currentNode!, addToBreadcrumb: false);
+          }
+        }
+      } else if (action == 'save') {
+        final docDir = await getApplicationDocumentsDirectory();
+        final targetDir = _currentNode?.path ?? docDir.path;
+        final timestamp = DateTime.now().millisecondsSinceEpoch;
+        final zipPath = '$targetDir/archive_$timestamp.zip';
+        await File(zipPath).writeAsBytes(zipData);
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('ZIP file saved')),
+          );
+          
+          if (_currentNode?.path != null) {
+            _navigateToNode(_currentNode!, addToBreadcrumb: false);
+          }
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error creating ZIP: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _importZipFile() async {
+    try {
+      setState(() => _isImporting = true);
+      
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['zip'],
+        withData: false,
+      );
+      
+      if (result != null && result.files.single.path != null) {
+        await _extractZipFile(result.files.single.path!);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error importing ZIP: $e')),
+        );
+      }
+    } finally {
+      setState(() => _isImporting = false);
+    }
+  }
+
+  Future<void> _extractZipFile(String zipPath) async {
+    try {
+      final docDir = await getApplicationDocumentsDirectory();
+      final targetDir = _currentNode?.path ?? docDir.path;
+      
+      final bytes = await File(zipPath).readAsBytes();
+      final archive = ZipDecoder().decodeBytes(bytes);
+      
+      int fileCount = 0;
+      int folderCount = 0;
+      
+      for (final file in archive) {
+        final filename = file.name;
+        final filePath = '$targetDir/$filename';
+        
+        if (file.isFile) {
+          final outFile = File(filePath);
+          await outFile.create(recursive: true);
+          await outFile.writeAsBytes(file.content as List<int>);
+          fileCount++;
+        } else {
+          await Directory(filePath).create(recursive: true);
+          folderCount++;
+        }
+      }
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Extracted: $fileCount files, $folderCount folders',
+            ),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        
+        if (_currentNode?.path != null) {
+          _navigateToNode(_currentNode!, addToBreadcrumb: false);
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error extracting ZIP: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _exportFolderAsZip(FileSystemNode node) async {
+    if (!node.isDirectory || node.path == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Can only export folders')),
+      );
+      return;
+    }
+    
+    try {
+      setState(() => _isImporting = true);
+      
+      final archive = Archive();
+      await _addDirectoryToArchive(archive, node.path!, node.path!);
+      
+      final zipData = ZipEncoder().encode(archive);
+      if (zipData == null) {
+        throw Exception('Failed to create ZIP file');
+      }
+      
+      final tempDir = await getTemporaryDirectory();
+      final zipPath = '${tempDir.path}/${node.name}.zip';
+      final zipFile = File(zipPath);
+      await zipFile.writeAsBytes(zipData);
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Exported to: ${node.name}.zip'),
+            action: SnackBarAction(
+              label: 'Share',
+              onPressed: () => _shareFile(zipPath),
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error exporting: $e')),
+        );
+      }
+    } finally {
+      setState(() => _isImporting = false);
+    }
+  }
+
+  Future<void> _addDirectoryToArchive(
+    Archive archive,
+    String dirPath,
+    String basePath,
+  ) async {
+    final dir = Directory(dirPath);
+    final entities = await dir.list().toList();
+    
+    for (final entity in entities) {
+      final relativePath = entity.path.substring(basePath.length + 1);
+      
+      if (entity is File) {
+        final bytes = await entity.readAsBytes();
+        final file = ArchiveFile(relativePath, bytes.length, bytes);
+        archive.addFile(file);
+      } else if (entity is Directory) {
+        final file = ArchiveFile('$relativePath/', 0, []);
+        archive.addFile(file);
+        await _addDirectoryToArchive(archive, entity.path, basePath);
+      }
+    }
+  }
+
+  void _shareFile(String path) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Share functionality - use iOS Share Sheet')),
+    );
+  }
+
   Future<void> _importFiles() async {
     try {
       setState(() => _isImporting = true);
@@ -142,8 +544,7 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
       final result = await FilePicker.platform.pickFiles(
         allowMultiple: true,
         type: FileType.any,
-        withData: false, // We'll copy files instead of loading into memory
-        allowCompression: false,
+        withData: false,
       );
       
       if (result != null && result.files.isNotEmpty) {
@@ -160,28 +561,23 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     }
   }
 
-  // NEW: Import a folder (iOS has limited support, but we can try)
-  Future<void> _importFolder() async {
+  Future<void> _importFromPhotos() async {
     try {
       setState(() => _isImporting = true);
       
-      final result = await FilePicker.platform.getDirectoryPath();
+      final result = await FilePicker.platform.pickFiles(
+        allowMultiple: true,
+        type: FileType.image,
+        withData: false,
+      );
       
-      if (result != null) {
-        await _copyDirectoryToDocuments(result);
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Note: iOS has limited folder access. Try importing individual files instead.'),
-            ),
-          );
-        }
+      if (result != null && result.files.isNotEmpty) {
+        await _copyFilesToDocuments(result.files);
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error importing folder: $e')),
+          SnackBar(content: Text('Error importing photos: $e')),
         );
       }
     } finally {
@@ -189,7 +585,31 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     }
   }
 
-  // NEW: Copy picked files to Documents directory
+  Future<void> _importDocuments() async {
+    try {
+      setState(() => _isImporting = true);
+      
+      final result = await FilePicker.platform.pickFiles(
+        allowMultiple: true,
+        type: FileType.custom,
+        allowedExtensions: ['pdf', 'doc', 'docx', 'txt', 'xls', 'xlsx', 'ppt', 'pptx'],
+        withData: false,
+      );
+      
+      if (result != null && result.files.isNotEmpty) {
+        await _copyFilesToDocuments(result.files);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error importing documents: $e')),
+        );
+      }
+    } finally {
+      setState(() => _isImporting = false);
+    }
+  }
+
   Future<void> _copyFilesToDocuments(List<PlatformFile> files) async {
     try {
       final docDir = await getApplicationDocumentsDirectory();
@@ -208,9 +628,7 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
           final sourceFile = File(file.path!);
           final targetPath = '$targetDir/${file.name}';
           
-          // Check if file already exists
           if (await File(targetPath).exists()) {
-            // Add timestamp to make it unique
             final timestamp = DateTime.now().millisecondsSinceEpoch;
             final nameParts = file.name.split('.');
             final ext = nameParts.length > 1 ? nameParts.last : '';
@@ -243,7 +661,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
           SnackBar(content: Text(message)),
         );
         
-        // Refresh current directory
         if (_currentNode?.path != null) {
           _navigateToNode(_currentNode!, addToBreadcrumb: false);
         }
@@ -253,56 +670,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: $e')),
         );
-      }
-    }
-  }
-
-  // NEW: Copy directory to Documents
-  Future<void> _copyDirectoryToDocuments(String sourcePath) async {
-    try {
-      final docDir = await getApplicationDocumentsDirectory();
-      final targetDir = _currentNode?.path ?? docDir.path;
-      
-      final sourceDir = Directory(sourcePath);
-      final folderName = sourcePath.split('/').last;
-      final targetPath = '$targetDir/$folderName';
-      
-      // Create target directory
-      final newDir = Directory(targetPath);
-      await newDir.create(recursive: true);
-      
-      // Copy contents recursively
-      await _copyDirectoryContents(sourceDir, newDir);
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Folder "$folderName" imported successfully')),
-        );
-        
-        // Refresh current directory
-        if (_currentNode?.path != null) {
-          _navigateToNode(_currentNode!, addToBreadcrumb: false);
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
-      }
-    }
-  }
-
-  Future<void> _copyDirectoryContents(Directory source, Directory target) async {
-    await for (final entity in source.list()) {
-      final name = entity.path.split('/').last;
-      
-      if (entity is File) {
-        await entity.copy('${target.path}/$name');
-      } else if (entity is Directory) {
-        final newDir = Directory('${target.path}/$name');
-        await newDir.create();
-        await _copyDirectoryContents(entity, newDir);
       }
     }
   }
@@ -315,7 +682,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     
     FileSystemNode updatedNode = node;
     
-    // If node has a real path and no children loaded yet, load them
     if (node.path != null && node.children.isEmpty && node.type == FileSystemNodeType.directory) {
       final children = await _loadDirectoryContents(node.path!);
       updatedNode = node.copyWith(children: children, isExpanded: true);
@@ -344,14 +710,11 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         _breadcrumbs = _breadcrumbs.sublist(0, index + 1);
       });
       
-      // Navigate back to root or parent
       if (index == 0) {
         setState(() {
           _currentNode = _rootNode;
         });
       } else {
-        // Find the node at this breadcrumb level
-        // This would require tracking the node path - simplified for now
         _navigateBack();
       }
     }
@@ -361,7 +724,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     if (_breadcrumbs.length > 1) {
       setState(() {
         _breadcrumbs.removeLast();
-        // Simplified: go back to root if at depth 1
         if (_breadcrumbs.length == 1) {
           _currentNode = _rootNode;
         }
@@ -456,6 +818,17 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
             ],
           ),
         ),
+        if (node.isDirectory)
+          const PopupMenuItem<String>(
+            value: 'export_zip',
+            child: Row(
+              children: [
+                Icon(Icons.folder_zip, size: 20, color: Color(0xFF1976D2)),
+                SizedBox(width: 12),
+                Text('Export as ZIP'),
+              ],
+            ),
+          ),
         const PopupMenuItem<String>(
           value: 'share',
           child: Row(
@@ -501,6 +874,9 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         break;
       case 'move':
         _showMoveDialog(node);
+        break;
+      case 'export_zip':
+        _exportFolderAsZip(node);
         break;
       case 'share':
         _shareNode(node);
@@ -611,7 +987,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Renamed successfully')),
         );
-        // Refresh current directory
         if (_currentNode?.path != null) {
           _navigateToNode(_currentNode!, addToBreadcrumb: false);
         }
@@ -682,7 +1057,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('${node.name} deleted')),
         );
-        // Refresh current directory
         if (_currentNode?.path != null) {
           _navigateToNode(_currentNode!, addToBreadcrumb: false);
         }
@@ -746,7 +1120,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
           children: [
             CommonWidgets.buildStatusBar(context, 'File Explorer'),
             
-            // Breadcrumb Navigation
             if (_breadcrumbs.isNotEmpty)
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -799,7 +1172,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
                 ),
               ),
             
-            // Search Bar
             Padding(
               padding: const EdgeInsets.all(16.0),
               child: CupertinoSearchTextField(
@@ -813,7 +1185,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
               ),
             ),
             
-            // File/Folder List or Grid
             Expanded(
               child: _isImporting
                   ? const Center(
@@ -822,7 +1193,7 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
                         children: [
                           CircularProgressIndicator(),
                           SizedBox(height: 16),
-                          Text('Importing files...'),
+                          Text('Processing files...'),
                         ],
                       ),
                     )
@@ -844,9 +1215,7 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
   }
 
   Widget _buildListView() {
-    final nodes = _currentNode!.type == FileSystemNodeType.virtualRoot
-        ? _currentNode!.children
-        : _currentNode!.children;
+    final nodes = _currentNode!.children;
     
     if (nodes.isEmpty && _currentNode!.type != FileSystemNodeType.virtualRoot) {
       return Center(
@@ -963,46 +1332,205 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
   void _showCreateMenu() {
     showModalBottomSheet(
       context: context,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.file_upload, color: Color(0xFF1976D2)),
-              title: const Text('Import Files'),
-              subtitle: const Text('From iCloud Drive, Files app, etc.'),
-              onTap: () {
-                Navigator.pop(context);
-                _importFiles();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.drive_folder_upload, color: Color(0xFF1976D2)),
-              title: const Text('Import Folder'),
-              subtitle: const Text('iOS has limited folder support'),
-              onTap: () {
-                Navigator.pop(context);
-                _importFolder();
-              },
-            ),
-            const Divider(),
-            ListTile(
-              leading: const Icon(Icons.create_new_folder),
-              title: const Text('New Folder'),
-              onTap: () {
-                Navigator.pop(context);
-                _showNewFolderDialog();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.note_add),
-              title: const Text('New File'),
-              onTap: () {
-                Navigator.pop(context);
-                _showNewFileDialog();
-              },
-            ),
-          ],
+      isScrollControlled: true,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (context, scrollController) => SafeArea(
+          child: Column(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey[300],
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Add to FilevaultPro',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              
+              Expanded(
+                child: ListView(
+                  controller: scrollController,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                      child: const Text(
+                        '🤖 AUTOMATIC (No Manual ZIP Needed)',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1976D2),
+                        ),
+                      ),
+                    ),
+                    
+                    Container(
+                      color: const Color(0xFFE8F5E9),
+                      child: ListTile(
+                        leading: const Icon(
+                          Icons.auto_awesome,
+                          color: Color(0xFF4CAF50),
+                          size: 32,
+                        ),
+                        title: const Text(
+                          'Smart Import & Organize',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        subtitle: const Text(
+                          'Select files → Auto-creates folder → Organizes everything\n✨ Fully automatic!',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                        trailing: const Icon(Icons.stars, color: Color(0xFFFFB300)),
+                        onTap: () {
+                          Navigator.pop(context);
+                          _importAndAutoOrganize();
+                        },
+                      ),
+                    ),
+                    
+                    ListTile(
+                      leading: const Icon(
+                        Icons.compress,
+                        color: Color(0xFF4CAF50),
+                      ),
+                      title: const Text('Auto-ZIP Multiple Files'),
+                      subtitle: const Text(
+                        'Select files → App compresses them → Extract or save',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _createZipFromMultipleFiles();
+                      },
+                    ),
+                    
+                    const Divider(),
+                    
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                      child: const Text(
+                        '📦 MANUAL (You Create ZIP First)',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.grey,
+                        ),
+                      ),
+                    ),
+                    
+                    ListTile(
+                      leading: const Icon(
+                        Icons.folder_zip,
+                        color: Color(0xFF1976D2),
+                      ),
+                      title: const Text('Import ZIP File'),
+                      subtitle: const Text(
+                        'If you already compressed folders externally',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _importZipFile();
+                      },
+                    ),
+                    
+                    const Divider(),
+                    
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                      child: const Text(
+                        '📁 REGULAR IMPORT',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.grey,
+                        ),
+                      ),
+                    ),
+                    
+                    ListTile(
+                      leading: const Icon(Icons.file_upload, color: Color(0xFF1976D2)),
+                      title: const Text('Import Any Files'),
+                      subtitle: const Text('From Files app, iCloud Drive, etc.'),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _importFiles();
+                      },
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.photo_library, color: Color(0xFF4CAF50)),
+                      title: const Text('Import Photos'),
+                      subtitle: const Text('Images from anywhere'),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _importFromPhotos();
+                      },
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.description, color: Color(0xFFFF9800)),
+                      title: const Text('Import Documents'),
+                      subtitle: const Text('PDFs, Word, Excel, etc.'),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _importDocuments();
+                      },
+                    ),
+                    
+                    const Divider(),
+                    
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                      child: const Text(
+                        '➕ CREATE NEW',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.grey,
+                        ),
+                      ),
+                    ),
+                    
+                    ListTile(
+                      leading: const Icon(Icons.create_new_folder),
+                      title: const Text('New Folder'),
+                      subtitle: const Text('Create an empty folder'),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _showNewFolderDialog();
+                      },
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.note_add),
+                      title: const Text('New Text File'),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _showNewFileDialog();
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1054,7 +1582,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Folder "$name" created')),
         );
-        // Refresh current directory
         _navigateToNode(_currentNode!, addToBreadcrumb: false);
       }
     } catch (e) {
