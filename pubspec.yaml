@@ -1,37 +1,29 @@
-name: filevaultpro
-description: A Flutter-based file management and security app.
-publish_to: "none" # Prevent accidental publishing
+name: file_vault_pro
+description: "A comprehensive file management and security app for iOS"
+publish_to: 'none'
 
-version: 1.0.0+3
+version: 1.0.0+4
 
 environment:
-  sdk: ">=3.0.0 <4.0.0"
+  sdk: ^3.6.0
 
 dependencies:
   flutter:
     sdk: flutter
 
-  # ✅ Updated packages (latest stable)
-  file_picker: ^10.3.3
-  fl_chart: ^1.1.1
-  flutter_slidable: ^4.0.3
-  go_router: ^16.2.4
-  permission_handler: ^12.0.1
-
-  provider: ^6.1.5+1
-  path_provider: ^2.1.5
-  percent_indicator: ^4.2.2
-
-
-  # Add material icons and Cupertino support
   cupertino_icons: ^1.0.8
+  provider: ^6.1.2
+  file_picker: ^8.1.4
+  path_provider: ^2.1.5
+  fl_chart: ^0.70.1
+  percent_indicator: ^4.2.3
+  image_picker: ^1.1.2
+  photo_manager: ^3.5.2
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-
-  # ✅ Latest linting rules for Flutter 3.x
-  flutter_lints: ^6.0.0
+  flutter_lints: ^5.0.0
 
 flutter:
   uses-material-design: true

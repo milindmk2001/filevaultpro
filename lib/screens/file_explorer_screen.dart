@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
-import '../models/data_models.dart';
+import '../models/file_system_models.dart';
 import '../widgets/common_widgets.dart';
 
 class FileExplorerScreen extends StatefulWidget {
@@ -15,11 +14,10 @@ class FileExplorerScreen extends StatefulWidget {
 
 class _FileExplorerScreenState extends State<FileExplorerScreen> {
   final TextEditingController _searchController = TextEditingController();
-  bool _showFileBrowser = false;
-  bool _showMediaBrowser = false;
-  String _currentPath = '';
-  List<FileSystemEntity> _files = [];
-  bool _isLoading = false;
+  late FileSystemNode _rootNode;
+  List<BreadcrumbItem> _breadcrumbs = [];
+  FileSystemNode? _currentNode;
+  bool _isGridView = false;
   
   // Clipboard for cut/copy/paste
   FileSystemEntity? _clipboardItem;
@@ -28,90 +26,238 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
   @override
   void initState() {
     super.initState();
-    _initializePath();
+    _initializeFileSystem();
   }
 
-  Future<void> _initializePath() async {
-    final directory = await getApplicationDocumentsDirectory();
+  Future<void> _initializeFileSystem() async {
     setState(() {
-      _currentPath = directory.path;
-    });
-  }
-
-  Future<void> _loadFiles(String path) async {
-    setState(() {
-      _isLoading = true;
+      _rootNode = FileSystemNodeFactory.createVirtualRoot();
+      _currentNode = _rootNode;
+      _breadcrumbs = [
+        BreadcrumbItem(name: 'Files', depth: 0),
+      ];
     });
     
+    // Load real file system data for accessible directories
+    await _loadOnMyIPhoneData();
+  }
+
+  Future<void> _loadOnMyIPhoneData() async {
+    try {
+      final docDir = await getApplicationDocumentsDirectory();
+      final libDir = await getApplicationSupportDirectory();
+      final tempDir = await getTemporaryDirectory();
+      
+      // Find On My iPhone node and populate it
+      final onMyIPhoneIndex = _rootNode.children.indexWhere(
+        (node) => node.category == RootCategory.onMyIPhone
+      );
+      
+      if (onMyIPhoneIndex != -1) {
+        final children = [
+          await _createNodeFromDirectory(docDir, 'Documents'),
+          await _createNodeFromDirectory(libDir, 'App Support'),
+          await _createNodeFromDirectory(tempDir, 'Temporary'),
+        ];
+        
+        final updatedNode = _rootNode.children[onMyIPhoneIndex].copyWith(
+          children: children,
+          path: docDir.parent.path,
+        );
+        
+        final updatedChildren = List<FileSystemNode>.from(_rootNode.children);
+        updatedChildren[onMyIPhoneIndex] = updatedNode;
+        
+        setState(() {
+          _rootNode = _rootNode.copyWith(children: updatedChildren);
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading file system: $e');
+    }
+  }
+
+  Future<FileSystemNode> _createNodeFromDirectory(Directory dir, String displayName) async {
+    return FileSystemNode(
+      name: displayName,
+      path: dir.path,
+      type: FileSystemNodeType.directory,
+      icon: Icons.folder,
+      iconColor: const Color(0xFF1976D2),
+      entity: dir,
+    );
+  }
+
+  Future<List<FileSystemNode>> _loadDirectoryContents(String path) async {
     try {
       final dir = Directory(path);
-      final List<FileSystemEntity> entities = await dir.list().toList();
+      final entities = await dir.list().toList();
       
-      // Sort: directories first, then files, both alphabetically
-      entities.sort((a, b) {
-        final aIsDir = a is Directory;
-        final bIsDir = b is Directory;
+      final nodes = <FileSystemNode>[];
+      
+      for (final entity in entities) {
+        final name = entity.path.split('/').last;
+        final isDirectory = entity is Directory;
         
-        if (aIsDir && !bIsDir) return -1;
-        if (!aIsDir && bIsDir) return 1;
+        FileStat? stat;
+        try {
+          stat = await entity.stat();
+        } catch (e) {
+          debugPrint('Error getting stat for $name: $e');
+        }
         
-        return a.path.toLowerCase().compareTo(b.path.toLowerCase());
+        nodes.add(FileSystemNode(
+          name: name,
+          path: entity.path,
+          type: isDirectory ? FileSystemNodeType.directory : FileSystemNodeType.file,
+          icon: isDirectory ? Icons.folder : _getFileIcon(name),
+          iconColor: isDirectory ? const Color(0xFF1976D2) : Colors.grey,
+          entity: entity,
+          fileSize: stat?.size,
+          modifiedDate: stat?.modified,
+        ));
+      }
+      
+      // Sort: directories first, then files
+      nodes.sort((a, b) {
+        if (a.isDirectory && !b.isDirectory) return -1;
+        if (!a.isDirectory && b.isDirectory) return 1;
+        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
       });
       
-      setState(() {
-        _files = entities;
-        _currentPath = path;
-        _isLoading = false;
-      });
+      return nodes;
     } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading files: $e')),
+      debugPrint('Error loading directory contents: $e');
+      return [];
+    }
+  }
+
+  Future<void> _navigateToNode(FileSystemNode node, {bool addToBreadcrumb = true}) async {
+    if (node.type == FileSystemNodeType.file) {
+      _showFilePreview(node);
+      return;
+    }
+    
+    FileSystemNode updatedNode = node;
+    
+    // If node has a real path and no children loaded yet, load them
+    if (node.path != null && node.children.isEmpty && node.type == FileSystemNodeType.directory) {
+      final children = await _loadDirectoryContents(node.path!);
+      updatedNode = node.copyWith(children: children, isExpanded: true);
+    } else {
+      updatedNode = node.copyWith(isExpanded: !node.isExpanded);
+    }
+    
+    setState(() {
+      _currentNode = updatedNode;
+      
+      if (addToBreadcrumb) {
+        _breadcrumbs.add(
+          BreadcrumbItem(
+            name: node.name,
+            path: node.path,
+            depth: _breadcrumbs.length,
+          ),
         );
+      }
+    });
+  }
+
+  void _navigateToBreadcrumb(int index) {
+    if (index < _breadcrumbs.length - 1) {
+      setState(() {
+        _breadcrumbs = _breadcrumbs.sublist(0, index + 1);
+      });
+      
+      // Navigate back to root or parent
+      if (index == 0) {
+        setState(() {
+          _currentNode = _rootNode;
+        });
+      } else {
+        // Find the node at this breadcrumb level
+        // This would require tracking the node path - simplified for now
+        _navigateBack();
       }
     }
   }
 
-  Future<void> _goToParentDirectory() async {
-    final parentDir = Directory(_currentPath).parent;
-    if (parentDir.path != _currentPath) {
-      await _loadFiles(parentDir.path);
+  void _navigateBack() {
+    if (_breadcrumbs.length > 1) {
+      setState(() {
+        _breadcrumbs.removeLast();
+        // Simplified: go back to root if at depth 1
+        if (_breadcrumbs.length == 1) {
+          _currentNode = _rootNode;
+        }
+      });
     }
   }
 
-  void _showContextMenu(BuildContext context, FileSystemEntity entity, Offset position) {
-    final isDirectory = entity is Directory;
-    
+  void _showFilePreview(FileSystemNode node) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(node.name),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(_getFileIcon(node.name), size: 64, color: Colors.grey),
+            const SizedBox(height: 16),
+            Text('Type: ${_getFileExtension(node.name)}'),
+            if (node.fileSize != null)
+              Text('Size: ${_formatFileSize(node.fileSize!)}'),
+            if (node.modifiedDate != null)
+              Text('Modified: ${_formatDate(node.modifiedDate!)}'),
+            if (node.path != null)
+              Text('Path: ${node.path}', style: const TextStyle(fontSize: 12)),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showContextMenu(BuildContext context, FileSystemNode node, Offset position) {
     showMenu<String>(
       context: context,
-      position: RelativeRect.fromLTRB(
-        position.dx,
-        position.dy,
-        position.dx + 1,
-        position.dy + 1,
-      ),
+      position: RelativeRect.fromLTRB(position.dx, position.dy, position.dx + 1, position.dy + 1),
       items: <PopupMenuEntry<String>>[
+        if (!node.isDirectory)
+          const PopupMenuItem<String>(
+            value: 'open',
+            child: Row(
+              children: [
+                Icon(Icons.open_in_new, size: 20),
+                SizedBox(width: 12),
+                Text('Open'),
+              ],
+            ),
+          ),
         const PopupMenuItem<String>(
-          value: 'properties',
+          value: 'info',
           child: Row(
             children: [
               Icon(Icons.info_outline, size: 20),
               SizedBox(width: 12),
-              Text('Properties'),
+              Text('Info'),
             ],
           ),
         ),
         const PopupMenuDivider(),
         const PopupMenuItem<String>(
-          value: 'cut',
+          value: 'rename',
           child: Row(
             children: [
-              Icon(Icons.content_cut, size: 20),
+              Icon(Icons.drive_file_rename_outline, size: 20),
               SizedBox(width: 12),
-              Text('Cut'),
+              Text('Rename'),
             ],
           ),
         ),
@@ -125,28 +271,27 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
             ],
           ),
         ),
-        if (_clipboardItem != null)
-          const PopupMenuItem<String>(
-            value: 'paste',
-            child: Row(
-              children: [
-                Icon(Icons.content_paste, size: 20),
-                SizedBox(width: 12),
-                Text('Paste Here'),
-              ],
-            ),
-          ),
-        const PopupMenuDivider(),
         const PopupMenuItem<String>(
-          value: 'rename',
+          value: 'move',
           child: Row(
             children: [
-              Icon(Icons.drive_file_rename_outline, size: 20),
+              Icon(Icons.drive_file_move, size: 20),
               SizedBox(width: 12),
-              Text('Rename'),
+              Text('Move to'),
             ],
           ),
         ),
+        const PopupMenuItem<String>(
+          value: 'share',
+          child: Row(
+            children: [
+              Icon(Icons.share, size: 20),
+              SizedBox(width: 12),
+              Text('Share'),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(),
         const PopupMenuItem<String>(
           value: 'delete',
           child: Row(
@@ -159,107 +304,47 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         ),
       ],
     ).then((value) {
-      if (value != null) {
-        switch (value) {
-          case 'properties':
-            _showPropertiesDialog(entity);
-            break;
-          case 'cut':
-            setState(() {
-              _clipboardItem = entity;
-              _isCutOperation = true;
-            });
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('${_getEntityName(entity)} cut to clipboard')),
-            );
-            break;
-          case 'copy':
-            setState(() {
-              _clipboardItem = entity;
-              _isCutOperation = false;
-            });
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('${_getEntityName(entity)} copied to clipboard')),
-            );
-            break;
-          case 'paste':
-            _pasteItem(isDirectory ? entity.path : _currentPath);
-            break;
-          case 'rename':
-            _showRenameDialog(entity);
-            break;
-          case 'delete':
-            _confirmDelete(entity);
-            break;
-        }
+      if (value != null && mounted) {
+        _handleContextMenuAction(value, node);
       }
     });
   }
 
-  Future<void> _pasteItem(String destinationPath) async {
-    if (_clipboardItem == null) return;
-    
-    try {
-      final fileName = _getEntityName(_clipboardItem!);
-      final newPath = '$destinationPath/$fileName';
-      
-      if (_isCutOperation) {
-        // Move operation
-        await _clipboardItem!.rename(newPath);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$fileName moved successfully')),
-        );
-      } else {
-        // Copy operation
-        if (_clipboardItem is File) {
-          await File(_clipboardItem!.path).copy(newPath);
-        } else if (_clipboardItem is Directory) {
-          await _copyDirectory(Directory(_clipboardItem!.path), Directory(newPath));
-        }
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$fileName copied successfully')),
-        );
-      }
-      
-      setState(() {
-        _clipboardItem = null;
-        _isCutOperation = false;
-      });
-      
-      await _loadFiles(_currentPath);
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
+  void _handleContextMenuAction(String action, FileSystemNode node) {
+    switch (action) {
+      case 'open':
+        _showFilePreview(node);
+        break;
+      case 'info':
+        _showFileInfo(node);
+        break;
+      case 'rename':
+        _showRenameDialog(node);
+        break;
+      case 'copy':
+        _copyNode(node);
+        break;
+      case 'move':
+        _showMoveDialog(node);
+        break;
+      case 'share':
+        _shareNode(node);
+        break;
+      case 'delete':
+        _confirmDelete(node);
+        break;
     }
   }
 
-  Future<void> _copyDirectory(Directory source, Directory destination) async {
-    await destination.create(recursive: true);
-    await for (final entity in source.list(recursive: false)) {
-      if (entity is Directory) {
-        final newDirectory = Directory('${destination.path}/${entity.path.split('/').last}');
-        await _copyDirectory(entity, newDirectory);
-      } else if (entity is File) {
-        await entity.copy('${destination.path}/${entity.path.split('/').last}');
-      }
-    }
-  }
-
-  void _showPropertiesDialog(FileSystemEntity entity) {
-    final isDirectory = entity is Directory;
-    final name = _getEntityName(entity);
-    
-    FileStat stat = FileStat.statSync(entity.path);
-    
+  void _showFileInfo(FileSystemNode node) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: Row(
           children: [
-            Icon(isDirectory ? Icons.folder : Icons.insert_drive_file),
+            Icon(node.icon, color: node.iconColor),
             const SizedBox(width: 8),
-            Expanded(child: Text(name)),
+            Expanded(child: Text(node.name)),
           ],
         ),
         content: SingleChildScrollView(
@@ -267,15 +352,13 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              _buildPropertyRow('Type', isDirectory ? 'Folder' : 'File'),
-              _buildPropertyRow('Location', entity.parent.path),
-              if (!isDirectory)
-                _buildPropertyRow('Size', _formatFileSize(stat.size)),
-              _buildPropertyRow('Modified', _formatDate(stat.modified)),
-              _buildPropertyRow('Accessed', _formatDate(stat.accessed)),
-              _buildPropertyRow('Changed', _formatDate(stat.changed)),
-              const Divider(),
-              _buildPropertyRow('Path', entity.path),
+              _buildInfoRow('Type', node.isDirectory ? 'Folder' : 'File'),
+              if (node.path != null)
+                _buildInfoRow('Location', node.path!),
+              if (node.fileSize != null)
+                _buildInfoRow('Size', _formatFileSize(node.fileSize!)),
+              if (node.modifiedDate != null)
+                _buildInfoRow('Modified', _formatDate(node.modifiedDate!)),
             ],
           ),
         ),
@@ -289,7 +372,7 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     );
   }
 
-  Widget _buildPropertyRow(String label, String value) {
+  Widget _buildInfoRow(String label, String value) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
@@ -297,24 +380,18 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         children: [
           SizedBox(
             width: 80,
-            child: Text(
-              '$label:',
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
+            child: Text('$label:', style: const TextStyle(fontWeight: FontWeight.bold)),
           ),
           Expanded(
-            child: Text(
-              value,
-              style: const TextStyle(color: Colors.grey),
-            ),
+            child: Text(value, style: const TextStyle(color: Colors.grey)),
           ),
         ],
       ),
     );
   }
 
-  void _showRenameDialog(FileSystemEntity entity) {
-    final controller = TextEditingController(text: _getEntityName(entity));
+  void _showRenameDialog(FileSystemNode node) {
+    final controller = TextEditingController(text: node.name);
     
     showDialog(
       context: context,
@@ -334,23 +411,11 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () async {
+            onPressed: () {
               final newName = controller.text.trim();
-              if (newName.isEmpty) return;
-              
-              try {
-                final newPath = '${entity.parent.path}/$newName';
-                await entity.rename(newPath);
+              if (newName.isNotEmpty && node.entity != null) {
+                _renameNode(node, newName);
                 Navigator.pop(context);
-                await _loadFiles(_currentPath);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Renamed successfully')),
-                );
-              } catch (e) {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Error: $e')),
-                );
               }
             },
             child: const Text('Rename'),
@@ -360,14 +425,61 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     );
   }
 
-  void _confirmDelete(FileSystemEntity entity) {
-    final name = _getEntityName(entity);
+  Future<void> _renameNode(FileSystemNode node, String newName) async {
+    if (node.entity == null) return;
     
+    try {
+      final newPath = '${node.entity!.parent.path}/$newName';
+      await node.entity!.rename(newPath);
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Renamed successfully')),
+        );
+        // Refresh current directory
+        if (_currentNode?.path != null) {
+          _navigateToNode(_currentNode!, addToBreadcrumb: false);
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    }
+  }
+
+  void _copyNode(FileSystemNode node) {
+    setState(() {
+      _clipboardItem = node.entity;
+      _isCutOperation = false;
+    });
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${node.name} copied to clipboard')),
+      );
+    }
+  }
+
+  void _showMoveDialog(FileSystemNode node) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Move functionality - select destination')),
+    );
+  }
+
+  void _shareNode(FileSystemNode node) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Share functionality would use iOS Share Sheet')),
+    );
+  }
+
+  void _confirmDelete(FileSystemNode node) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete'),
-        content: Text('Are you sure you want to delete "$name"?'),
+        content: Text('Are you sure you want to delete "${node.name}"?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -375,19 +487,8 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
           ),
           ElevatedButton(
             onPressed: () async {
-              try {
-                await entity.delete(recursive: true);
-                Navigator.pop(context);
-                await _loadFiles(_currentPath);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('$name deleted')),
-                );
-              } catch (e) {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Error: $e')),
-                );
-              }
+              Navigator.pop(context);
+              await _deleteNode(node);
             },
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             child: const Text('Delete'),
@@ -397,8 +498,64 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     );
   }
 
-  String _getEntityName(FileSystemEntity entity) {
-    return entity.path.split('/').last;
+  Future<void> _deleteNode(FileSystemNode node) async {
+    if (node.entity == null) return;
+    
+    try {
+      await node.entity!.delete(recursive: true);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${node.name} deleted')),
+        );
+        // Refresh current directory
+        if (_currentNode?.path != null) {
+          _navigateToNode(_currentNode!, addToBreadcrumb: false);
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    }
+  }
+
+  IconData _getFileIcon(String fileName) {
+    final ext = fileName.split('.').last.toLowerCase();
+    switch (ext) {
+      case 'pdf': return Icons.picture_as_pdf;
+      case 'jpg':
+      case 'jpeg':
+      case 'png':
+      case 'gif':
+      case 'heic': return Icons.image;
+      case 'mp4':
+      case 'mov':
+      case 'avi': return Icons.video_file;
+      case 'mp3':
+      case 'wav':
+      case 'm4a': return Icons.audio_file;
+      case 'doc':
+      case 'docx':
+      case 'txt': return Icons.description;
+      case 'zip':
+      case 'rar': return Icons.archive;
+      default: return Icons.insert_drive_file;
+    }
+  }
+
+  String _getFileExtension(String fileName) {
+    return fileName.split('.').last.toUpperCase();
+  }
+
+  String _formatFileSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
   }
 
   String _formatDate(DateTime date) {
@@ -407,243 +564,241 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_showFileBrowser) {
-      return _buildFileBrowser();
-    }
-    
-    if (_showMediaBrowser) {
-      return _buildMediaBrowser();
-    }
-
     return Scaffold(
       backgroundColor: const Color(0xFFFAFAFA),
       body: SafeArea(
         child: Column(
           children: [
             CommonWidgets.buildStatusBar(context, 'File Explorer'),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+            
+            // Breadcrumb Navigation
+            if (_breadcrumbs.isNotEmpty)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
                   children: [
-                    Text(
-                      'My Files',
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
+                    if (_breadcrumbs.length > 1)
+                      IconButton(
+                        icon: const Icon(Icons.arrow_back),
+                        onPressed: _navigateBack,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
                       ),
-                    ),
-                    const SizedBox(height: 16),
-                    
-                    CupertinoSearchTextField(
-                      controller: _searchController,
-                      placeholder: 'Search files and folders...',
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFE8E8E8),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    
-                    Text(
-                      'Quick Access',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _buildQuickAccessCard(
-                            'Files',
-                            '124 files',
-                            'Last updated: Oct 26, 2023',
-                            Icons.folder,
-                            () async {
-                              setState(() => _showFileBrowser = true);
-                              await _loadFiles(_currentPath);
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: _buildQuickAccessCard(
-                            'Media',
-                            '850 files',
-                            'Last updated: Nov 01, 2023',
-                            Icons.folder,
-                            () => setState(() => _showMediaBrowser = true),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 32),
-                    
-                    Text(
-                      'Recent Files',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    
                     Expanded(
-                      child: ListView.separated(
-                        itemCount: recentFiles.length,
-                        separatorBuilder: (context, index) => const SizedBox(height: 12),
-                        itemBuilder: (context, index) {
-                          final file = recentFiles[index];
-                          return _buildRecentFileItem(file);
-                        },
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: _breadcrumbs.asMap().entries.map((entry) {
+                            final index = entry.key;
+                            final item = entry.value;
+                            final isLast = index == _breadcrumbs.length - 1;
+                            
+                            return Row(
+                              children: [
+                                GestureDetector(
+                                  onTap: () => _navigateToBreadcrumb(index),
+                                  child: Text(
+                                    item.name,
+                                    style: TextStyle(
+                                      color: isLast ? Colors.black : const Color(0xFF1976D2),
+                                      fontWeight: isLast ? FontWeight.bold : FontWeight.normal,
+                                    ),
+                                  ),
+                                ),
+                                if (!isLast)
+                                  const Padding(
+                                    padding: EdgeInsets.symmetric(horizontal: 8),
+                                    child: Icon(Icons.chevron_right, size: 16, color: Colors.grey),
+                                  ),
+                              ],
+                            );
+                          }).toList(),
+                        ),
                       ),
+                    ),
+                    IconButton(
+                      icon: Icon(_isGridView ? Icons.view_list : Icons.grid_view),
+                      onPressed: () => setState(() => _isGridView = !_isGridView),
                     ),
                   ],
                 ),
               ),
+            
+            // Search Bar
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: CupertinoSearchTextField(
+                controller: _searchController,
+                placeholder: 'Search files and folders...',
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE8E8E8),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+            
+            // File/Folder List or Grid
+            Expanded(
+              child: _currentNode == null
+                  ? const Center(child: CircularProgressIndicator())
+                  : _isGridView
+                      ? _buildGridView()
+                      : _buildListView(),
             ),
           ],
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () async {
-          FilePickerResult? result = await FilePicker.platform.pickFiles();
-          if (result != null) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Selected: ${result.files.first.name}')),
-            );
-          }
-        },
+        onPressed: _showCreateMenu,
         backgroundColor: const Color(0xFF1976D2),
         child: const Icon(Icons.add, color: Colors.white),
       ),
     );
   }
 
-  Widget _buildFileBrowser() {
-    return Scaffold(
-      backgroundColor: const Color(0xFFFAFAFA),
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _buildListView() {
+    final nodes = _currentNode!.type == FileSystemNodeType.virtualRoot
+        ? _currentNode!.children
+        : _currentNode!.children;
+    
+    if (nodes.isEmpty && _currentNode!.type != FileSystemNodeType.virtualRoot) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Text('File Browser', style: TextStyle(fontSize: 18)),
-            Text(
-              _currentPath.length > 40 
-                ? '...${_currentPath.substring(_currentPath.length - 40)}'
-                : _currentPath,
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            Icon(Icons.folder_open, size: 64, color: Colors.grey[400]),
+            const SizedBox(height: 16),
+            Text('This folder is empty', style: TextStyle(color: Colors.grey[600])),
+          ],
+        ),
+      );
+    }
+    
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      itemCount: nodes.length,
+      itemBuilder: (context, index) {
+        final node = nodes[index];
+        return _buildListTile(node);
+      },
+    );
+  }
+
+  Widget _buildGridView() {
+    final nodes = _currentNode!.children;
+    
+    if (nodes.isEmpty) {
+      return const Center(child: Text('No items'));
+    }
+    
+    return GridView.builder(
+      padding: const EdgeInsets.all(16),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        crossAxisSpacing: 16,
+        mainAxisSpacing: 16,
+        childAspectRatio: 0.8,
+      ),
+      itemCount: nodes.length,
+      itemBuilder: (context, index) {
+        final node = nodes[index];
+        return _buildGridTile(node);
+      },
+    );
+  }
+
+  Widget _buildListTile(FileSystemNode node) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        leading: Icon(node.icon, color: node.iconColor, size: 32),
+        title: Text(node.name),
+        subtitle: node.fileSize != null
+            ? Text('${_formatFileSize(node.fileSize!)} • ${_formatDate(node.modifiedDate!)}')
+            : node.isDirectory
+                ? const Text('Folder')
+                : null,
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (node.hasChildren && node.type != FileSystemNodeType.file)
+              const Icon(Icons.chevron_right, color: Colors.grey),
+            IconButton(
+              icon: const Icon(Icons.more_vert, size: 20),
+              onPressed: () {
+                final RenderBox box = context.findRenderObject() as RenderBox;
+                final Offset position = box.localToGlobal(Offset.zero);
+                _showContextMenu(context, node, position);
+              },
             ),
           ],
         ),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => setState(() {
-            _showFileBrowser = false;
-            _files.clear();
-          }),
-        ),
-        actions: [
-          if (_currentPath.isNotEmpty && Directory(_currentPath).parent.path != _currentPath)
-            IconButton(
-              icon: const Icon(Icons.arrow_upward),
-              tooltip: 'Parent Directory',
-              onPressed: _goToParentDirectory,
-            ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Refresh',
-            onPressed: () => _loadFiles(_currentPath),
-          ),
-          if (_clipboardItem != null)
-            IconButton(
-              icon: Icon(
-                _isCutOperation ? Icons.content_cut : Icons.content_copy,
-                color: Colors.orange,
-              ),
-              tooltip: 'Paste',
-              onPressed: () => _pasteItem(_currentPath),
-            ),
-        ],
+        onTap: () => _navigateToNode(node),
+        onLongPress: () {
+          final RenderBox box = context.findRenderObject() as RenderBox;
+          final Offset position = box.localToGlobal(Offset.zero);
+          _showContextMenu(context, node, position);
+        },
       ),
-      body: _isLoading
-        ? const Center(child: CircularProgressIndicator())
-        : _files.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.folder_open, size: 64, color: Colors.grey[400]),
-                  const SizedBox(height: 16),
-                  Text(
-                    'This folder is empty',
-                    style: TextStyle(color: Colors.grey[600]),
-                  ),
-                ],
+    );
+  }
+
+  Widget _buildGridTile(FileSystemNode node) {
+    return GestureDetector(
+      onTap: () => _navigateToNode(node),
+      onLongPress: () {
+        final RenderBox box = context.findRenderObject() as RenderBox;
+        final Offset position = box.localToGlobal(Offset.zero);
+        _showContextMenu(context, node, position);
+      },
+      child: Card(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(node.icon, size: 48, color: node.iconColor),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Text(
+                node.name,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12),
               ),
-            )
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: _files.length,
-              itemBuilder: (context, index) {
-                final file = _files[index];
-                final isDirectory = file is Directory;
-                final fileName = _getEntityName(file);
-                
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  child: ListTile(
-                    leading: Icon(
-                      isDirectory ? Icons.folder : _getFileIcon(fileName),
-                      color: isDirectory ? const Color(0xFF1976D2) : Colors.grey,
-                      size: 32,
-                    ),
-                    title: Text(fileName),
-                    subtitle: !isDirectory
-                        ? FutureBuilder<FileStat>(
-                            future: file.stat(),
-                            builder: (context, snapshot) {
-                              if (snapshot.hasData) {
-                                return Text(
-                                  '${_formatFileSize(snapshot.data!.size)} • ${_formatDate(snapshot.data!.modified)}',
-                                  style: const TextStyle(fontSize: 12),
-                                );
-                              }
-                              return const Text('Loading...');
-                            },
-                          )
-                        : const Text('Folder'),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (isDirectory)
-                          const Icon(Icons.chevron_right, color: Colors.grey),
-                        IconButton(
-                          icon: const Icon(Icons.more_vert, size: 20),
-                          onPressed: () {
-                            final RenderBox box = context.findRenderObject() as RenderBox;
-                            final Offset position = box.localToGlobal(Offset.zero);
-                            _showContextMenu(context, file, position);
-                          },
-                        ),
-                      ],
-                    ),
-                    onTap: isDirectory ? () => _loadFiles(file.path) : null,
-                    onLongPress: () {
-                      final RenderBox box = context.findRenderObject() as RenderBox;
-                      final Offset position = box.localToGlobal(Offset.zero);
-                      _showContextMenu(context, file, position);
-                    },
-                  ),
-                );
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showCreateMenu() {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.create_new_folder),
+              title: const Text('New Folder'),
+              onTap: () {
+                Navigator.pop(context);
+                _showNewFolderDialog();
               },
             ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _showNewFolderDialog(),
-        backgroundColor: const Color(0xFF1976D2),
-        child: const Icon(Icons.create_new_folder, color: Colors.white),
+            ListTile(
+              leading: const Icon(Icons.note_add),
+              title: const Text('New File'),
+              onTap: () {
+                Navigator.pop(context);
+                _showNewFileDialog();
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -671,21 +826,9 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
           ElevatedButton(
             onPressed: () async {
               final name = controller.text.trim();
-              if (name.isEmpty) return;
-              
-              try {
-                final newDir = Directory('$_currentPath/$name');
-                await newDir.create();
+              if (name.isNotEmpty && _currentNode?.path != null) {
+                await _createNewFolder(name);
                 Navigator.pop(context);
-                await _loadFiles(_currentPath);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Folder "$name" created')),
-                );
-              } catch (e) {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Error: $e')),
-                );
               }
             },
             child: const Text('Create'),
@@ -695,147 +838,33 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     );
   }
 
-  IconData _getFileIcon(String fileName) {
-    final ext = fileName.split('.').last.toLowerCase();
-    switch (ext) {
-      case 'pdf':
-        return Icons.picture_as_pdf;
-      case 'jpg':
-      case 'jpeg':
-      case 'png':
-      case 'gif':
-        return Icons.image;
-      case 'mp4':
-      case 'mov':
-      case 'avi':
-        return Icons.video_file;
-      case 'mp3':
-      case 'wav':
-      case 'aac':
-        return Icons.audio_file;
-      case 'doc':
-      case 'docx':
-      case 'txt':
-        return Icons.description;
-      case 'zip':
-      case 'rar':
-        return Icons.archive;
-      default:
-        return Icons.insert_drive_file;
+  Future<void> _createNewFolder(String name) async {
+    if (_currentNode?.path == null) return;
+    
+    try {
+      final newDir = Directory('${_currentNode!.path}/$name');
+      await newDir.create();
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Folder "$name" created')),
+        );
+        // Refresh current directory
+        _navigateToNode(_currentNode!, addToBreadcrumb: false);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
     }
   }
 
-  Widget _buildMediaBrowser() {
-    return Scaffold(
-      backgroundColor: const Color(0xFFFAFAFA),
-      appBar: AppBar(
-        title: const Text('Media Browser'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => setState(() => _showMediaBrowser = false),
-        ),
-      ),
-      body: const Center(
-        child: Text('Media browser implementation'),
-      ),
+  void _showNewFileDialog() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('New file creation - coming soon')),
     );
-  }
-
-  Widget _buildQuickAccessCard(
-    String title,
-    String fileCount,
-    String lastUpdated,
-    IconData icon,
-    VoidCallback onTap,
-  ) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 120,
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Icon(icon, color: const Color(0xFF1976D2), size: 24),
-                const Icon(Icons.more_vert, color: Colors.grey, size: 20),
-              ],
-            ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                Text(
-                  fileCount,
-                  style: const TextStyle(color: Colors.grey),
-                ),
-                Text(
-                  lastUpdated,
-                  style: const TextStyle(fontSize: 12, color: Colors.grey),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRecentFileItem(RecentFile file) {
-    return Row(
-      children: [
-        Icon(file.icon, color: file.iconColor, size: 40),
-        const SizedBox(width: 16),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                file.name,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              Text(
-                '${file.size} • ${file.date}',
-                style: const TextStyle(
-                  color: Colors.grey,
-                  fontSize: 14,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const Icon(Icons.more_vert, color: Colors.grey, size: 20),
-      ],
-    );
-  }
-
-  String _formatFileSize(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    if (bytes < 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
   }
 
   @override
