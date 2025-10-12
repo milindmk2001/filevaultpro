@@ -7,7 +7,7 @@ import 'dart:io';
 import 'package:path/path.dart' as path;
 import '../models/file_system_models.dart';
 import '../widgets/common_widgets.dart';
-import '../services/compression_service.dart';  // NEW: Added compression service
+import '../services/compression_service.dart';
 
 class FileExplorerScreen extends StatefulWidget {
   const FileExplorerScreen({super.key});
@@ -27,7 +27,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
   FileSystemEntity? _clipboardItem;
   bool _isCutOperation = false;
 
-  // NEW: Selection mode variables
   bool _selectionMode = false;
   final List<FileSystemNode> _selectedItems = [];
 
@@ -135,11 +134,9 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     }
   }
 
-  // NEW: Toggle selection mode
   void _toggleSelectionMode(FileSystemNode node) {
     setState(() {
       if (_selectionMode) {
-        // Toggle selection of this item
         if (_selectedItems.contains(node)) {
           _selectedItems.remove(node);
           if (_selectedItems.isEmpty) {
@@ -149,7 +146,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
           _selectedItems.add(node);
         }
       } else {
-        // Enter selection mode
         _selectionMode = true;
         _selectedItems.clear();
         _selectedItems.add(node);
@@ -157,7 +153,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     });
   }
 
-  // NEW: Compress selected items using native iOS compression
   Future<void> _compressSelected() async {
     if (_selectedItems.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -166,7 +161,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
       return;
     }
 
-    // Show compression dialog
     final zipName = await showDialog<String>(
       context: context,
       builder: (context) => _CompressDialog(
@@ -178,7 +172,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     if (zipName == null || !mounted) return;
 
     try {
-      // Show loading dialog
       showDialog(
         context: context,
         barrierDismissible: false,
@@ -205,20 +198,16 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         ),
       );
 
-      // Get full paths of selected items
       final paths = _selectedItems.map((item) => item.path!).toList();
 
-      // Compress using native iOS code
       final zipPath = await CompressionService.compressFolders(
         paths: paths,
         outputName: zipName.endsWith('.zip') ? zipName : '$zipName.zip',
         preserveStructure: true,
       );
 
-      // Close loading dialog
       if (mounted) Navigator.of(context).pop();
 
-      // Show success
       final zipFile = File(zipPath);
       final zipStat = await zipFile.stat();
       final zipSize = CompressionService.formatBytes(zipStat.size);
@@ -233,7 +222,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         );
       }
 
-      // Refresh and clear selection
       setState(() {
         _selectedItems.clear();
         _selectionMode = false;
@@ -244,10 +232,8 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
       }
 
     } catch (e) {
-      // Close loading dialog
       if (mounted) Navigator.of(context).pop();
       
-      // Show error
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -259,12 +245,10 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     }
   }
 
-  // NEW: Smart Folder Import - Select folder and auto-compress
   Future<void> _smartFolderImport() async {
     try {
       setState(() => _isImporting = true);
       
-      // Show instructions dialog first
       final shouldContinue = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
@@ -320,14 +304,11 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         return;
       }
       
-      // Try to get directory path
       final directoryPath = await FilePicker.platform.getDirectoryPath();
       
       if (directoryPath != null) {
-        // Successfully got folder - compress and import it
         await _compressAndImportFolder(directoryPath);
       } else {
-        // Folder picker not supported or cancelled
         if (mounted) {
           _showFolderImportFallbackDialog();
         }
@@ -412,10 +393,8 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
 
   Future<void> _compressAndImportFolder(String folderPath) async {
     try {
-      final folderDir = Directory(folderPath);
       final folderName = folderPath.split('/').last;
       
-      // Show progress
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -425,7 +404,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         );
       }
       
-      // Create archive from folder
       final archive = Archive();
       await _addDirectoryToArchive(archive, folderPath, folderPath);
       
@@ -433,13 +411,11 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         throw Exception('Folder is empty or inaccessible');
       }
       
-      // Compress
       final zipData = ZipEncoder().encode(archive);
       if (zipData == null) {
         throw Exception('Failed to compress folder');
       }
       
-      // Ask what to do with compressed folder
       final action = await showDialog<String>(
         context: context,
         builder: (context) => AlertDialog(
@@ -468,7 +444,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
       );
       
       if (action == 'extract') {
-        // Extract to current location
         final docDir = await getApplicationDocumentsDirectory();
         final targetDir = _currentNode?.path ?? docDir.path;
         
@@ -503,7 +478,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
           }
         }
       } else if (action == 'save') {
-        // Save ZIP file
         final docDir = await getApplicationDocumentsDirectory();
         final targetDir = _currentNode?.path ?? docDir.path;
         final zipPath = '$targetDir/$folderName.zip';
@@ -1187,7 +1161,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
           ),
         ),
         const PopupMenuDivider(),
-        // NEW: Select for compression option
         const PopupMenuItem<String>(
           value: 'select',
           child: Row(
@@ -1577,14 +1550,12 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
                         ),
                       ),
                     ),
-                    // NEW: Show compress button when in selection mode
                     if (_selectionMode && _selectedItems.isNotEmpty)
                       IconButton(
                         icon: const Icon(Icons.archive, color: Color(0xFF4CAF50)),
                         tooltip: 'Compress Selected',
                         onPressed: _compressSelected,
                       ),
-                    // NEW: Show cancel selection button
                     if (_selectionMode)
                       IconButton(
                         icon: const Icon(Icons.close, color: Colors.red),
@@ -1604,7 +1575,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
                 ),
               ),
             
-            // NEW: Selection mode banner
             if (_selectionMode)
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -2012,7 +1982,7 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
                       onTap: () {
                         Navigator.pop(context);
                         _importDocuments();
-                      ),
+                      },
                     ),
                     
                     const Divider(),
@@ -2127,9 +2097,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
   }
 }
 
-// ========================================
-// COMPRESS DIALOG - NEW
-// ========================================
 class _CompressDialog extends StatefulWidget {
   final int itemCount;
   final List<FileSystemEntity> items;
@@ -2196,11 +2163,10 @@ class _CompressDialogState extends State<_CompressDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Stats section
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.blue.shade50,
+              color: Colors.blue,
               borderRadius: BorderRadius.circular(8),
             ),
             child: Column(
@@ -2228,8 +2194,6 @@ class _CompressDialogState extends State<_CompressDialog> {
             ),
           ),
           const SizedBox(height: 16),
-          
-          // File name input
           TextField(
             controller: _controller,
             decoration: const InputDecoration(
@@ -2240,20 +2204,17 @@ class _CompressDialogState extends State<_CompressDialog> {
             ),
             autofocus: true,
           ),
-          
           const SizedBox(height: 12),
-          
-          // Info message
           Row(
             children: [
-              Icon(Icons.info_outline, size: 16, color: Colors.grey.shade600),
+              Icon(Icons.info_outline, size: 16, color: Colors.grey[600]),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   'Folder structure will be preserved',
                   style: TextStyle(
                     fontSize: 12,
-                    color: Colors.grey.shade600,
+                    color: Colors.grey[600],
                   ),
                 ),
               ),
@@ -2282,16 +2243,23 @@ class _CompressDialogState extends State<_CompressDialog> {
   Widget _buildStatRow(IconData icon, String label, String value) {
     return Row(
       children: [
-        Icon(icon, size: 16, color: Colors.blue.shade700),
+        Icon(icon, size: 16, color: Colors.white),
         const SizedBox(width: 8),
         Text(
           label,
-          style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
+          style: const TextStyle(
+            fontWeight: FontWeight.w500,
+            fontSize: 13,
+            color: Colors.white,
+          ),
         ),
         const SizedBox(width: 4),
         Text(
           value,
-          style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+          style: const TextStyle(
+            fontSize: 13,
+            color: Colors.white70,
+          ),
         ),
       ],
     );
