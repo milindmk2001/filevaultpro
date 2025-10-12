@@ -1,7 +1,13 @@
+<<<<<<< HEAD
 
 import UIKit
 import Flutter
 
+=======
+import UIKit
+import Flutter
+
+>>>>>>> fa9065d49957c7bcd272dadea7b41a4b2f9ab31b
 @UIApplicationMain
 @objc class AppDelegate: FlutterAppDelegate {
     override func application(
@@ -118,4 +124,8 @@ import Flutter
             }
         }
     }
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> fa9065d49957c7bcd272dadea7b41a4b2f9ab31b

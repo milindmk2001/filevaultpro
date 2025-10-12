@@ -4,8 +4,10 @@ import 'package:path_provider/path_provider.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:archive/archive.dart';
 import 'dart:io';
+import 'package:path/path.dart' as path;
 import '../models/file_system_models.dart';
 import '../widgets/common_widgets.dart';
+import '../services/compression_service.dart';
 
 class FileExplorerScreen extends StatefulWidget {
   const FileExplorerScreen({super.key});
@@ -24,6 +26,9 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
   
   FileSystemEntity? _clipboardItem;
   bool _isCutOperation = false;
+
+  bool _selectionMode = false;
+  final List<FileSystemNode> _selectedItems = [];
 
   @override
   void initState() {
@@ -129,209 +134,372 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     }
   }
 
-  // UPDATED: Smart Folder Import with Bulk Instructions
-  Future<void> _smartFolderImport() async {
-    final action = await showDialog<String>(
+  void _toggleSelectionMode(FileSystemNode node) {
+    setState(() {
+      if (_selectionMode) {
+        if (_selectedItems.contains(node)) {
+          _selectedItems.remove(node);
+          if (_selectedItems.isEmpty) {
+            _selectionMode = false;
+          }
+        } else {
+          _selectedItems.add(node);
+        }
+      } else {
+        _selectionMode = true;
+        _selectedItems.clear();
+        _selectedItems.add(node);
+      }
+    });
+  }
+
+  Future<void> _compressSelected() async {
+    if (_selectedItems.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select items to compress')),
+      );
+      return;
+    }
+
+    final zipName = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.folder_special, color: Color(0xFF4CAF50)),
-            SizedBox(width: 8),
-            Expanded(child: Text('Smart Folder Import')),
-          ],
+      builder: (context) => _CompressDialog(
+        itemCount: _selectedItems.length,
+        items: _selectedItems.map((n) => n.entity!).toList(),
+      ),
+    );
+
+    if (zipName == null || !mounted) return;
+
+    try {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => Dialog(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const CircularProgressIndicator(),
+                const SizedBox(height: 16),
+                const Text(
+                  'Compressing...',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Creating ${zipName.endsWith('.zip') ? zipName : '$zipName.zip'}',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ],
+            ),
+          ),
         ),
-        content: SingleChildScrollView(
-          child: Column(
+      );
+
+      final paths = _selectedItems.map((item) => item.path!).toList();
+
+      final zipPath = await CompressionService.compressFolders(
+        paths: paths,
+        outputName: zipName.endsWith('.zip') ? zipName : '$zipName.zip',
+        preserveStructure: true,
+      );
+
+      if (mounted) Navigator.of(context).pop();
+
+      final zipFile = File(zipPath);
+      final zipStat = await zipFile.stat();
+      final zipSize = CompressionService.formatBytes(zipStat.size);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ Created ${path.basename(zipPath)} ($zipSize)'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+
+      setState(() {
+        _selectedItems.clear();
+        _selectionMode = false;
+      });
+      
+      if (_currentNode?.path != null) {
+        _navigateToNode(_currentNode!, addToBreadcrumb: false);
+      }
+
+    } catch (e) {
+      if (mounted) Navigator.of(context).pop();
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Compression failed: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _smartFolderImport() async {
+    try {
+      setState(() => _isImporting = true);
+      
+      final shouldContinue = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.folder_special, color: Color(0xFF4CAF50)),
+              SizedBox(width: 8),
+              Text('Smart Folder Import'),
+            ],
+          ),
+          content: const Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFFF3E0),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFFFF9800)),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(Icons.info_outline, color: Color(0xFFFF9800)),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'iOS doesn\'t allow direct folder selection',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+              Text(
+                'How it works:',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
               ),
-              const SizedBox(height: 16),
-              
-              // OPTION 1: Single Folder
-              const Text(
-                '📁 For Single Folder:',
+              SizedBox(height: 12),
+              Text('1️⃣ You\'ll select a folder from Files app'),
+              SizedBox(height: 8),
+              Text('2️⃣ App will automatically compress it'),
+              SizedBox(height: 8),
+              Text('3️⃣ Import with full folder structure'),
+              SizedBox(height: 16),
+              Text(
+                '✨ Completely automatic!',
                 style: TextStyle(
+                  color: Color(0xFF4CAF50),
                   fontWeight: FontWeight.bold,
-                  fontSize: 15,
-                  color: Color(0xFF1976D2),
-                ),
-              ),
-              const SizedBox(height: 8),
-              _buildInstructionStep('1', 'Open iOS Files App', Icons.folder),
-              const SizedBox(height: 6),
-              _buildInstructionStep('2', 'Long-press the folder', Icons.touch_app),
-              const SizedBox(height: 6),
-              _buildInstructionStep('3', 'Tap "Compress"', Icons.archive),
-              
-              const SizedBox(height: 16),
-              const Divider(),
-              const SizedBox(height: 16),
-              
-              // OPTION 2: Multiple Folders (BULK)
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE8F5E9),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFF4CAF50), width: 2),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Row(
-                      children: [
-                        Icon(Icons.stars, color: Color(0xFF4CAF50)),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            '📦 For Multiple Folders (BULK):',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15,
-                              color: Color(0xFF4CAF50),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    _buildInstructionStep('1', 'Open Files App', Icons.folder_open),
-                    const SizedBox(height: 6),
-                    _buildInstructionStep('2', 'Go to "On My iPhone"', Icons.phone_iphone),
-                    const SizedBox(height: 6),
-                    _buildInstructionStep('3', 'Tap "Select" (top-right)', Icons.check_circle_outline),
-                    const SizedBox(height: 6),
-                    _buildInstructionStep('4', 'Tap "Select All" or pick folders', Icons.select_all),
-                    const SizedBox(height: 6),
-                    _buildInstructionStep('5', 'Tap share icon (bottom)', Icons.ios_share),
-                    const SizedBox(height: 6),
-                    _buildInstructionStep('6', 'Tap "Compress"', Icons.archive),
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: const Text(
-                        '✨ Creates one ZIP with all selected folders!',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontStyle: FontStyle.italic,
-                          color: Color(0xFF4CAF50),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE3F2FD),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '🎯 Then come back here:',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF1976D2),
-                      ),
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      'Tap "Import ZIP" below to import everything at once!',
-                      style: TextStyle(fontSize: 12),
-                    ),
-                  ],
                 ),
               ),
             ],
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF4CAF50),
+              ),
+              child: const Text('Select Folder'),
+            ),
+          ],
+        ),
+      );
+      
+      if (shouldContinue != true) {
+        setState(() => _isImporting = false);
+        return;
+      }
+      
+      final directoryPath = await FilePicker.platform.getDirectoryPath();
+      
+      if (directoryPath != null) {
+        await _compressAndImportFolder(directoryPath);
+      } else {
+        if (mounted) {
+          _showFolderImportFallbackDialog();
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    } finally {
+      setState(() => _isImporting = false);
+    }
+  }
+
+  void _showFolderImportFallbackDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('📂 Smart Folder Import'),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '⚠️ iOS doesn\'t allow direct folder selection',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 16),
+            Text('📁 For Single Folder:'),
+            SizedBox(height: 8),
+            Text('① Open iOS Files App'),
+            Text('② Long-press the folder'),
+            Text('③ Tap "Compress"'),
+            SizedBox(height: 16),
+            Divider(),
+            SizedBox(height: 16),
+            Text(
+              '⭐ 📦 For Multiple Folders (BULK):',
+              style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF4CAF50)),
+            ),
+            SizedBox(height: 8),
+            Text('① Open Files App'),
+            Text('② Go to "On My iPhone"'),
+            Text('③ Tap "Select" (top-right)'),
+            Text('④ Select all folders you want'),
+            Text('⑤ Tap share icon (bottom)'),
+            Text('⑥ Tap "Compress"'),
+            SizedBox(height: 12),
+            Text(
+              '✨ Creates one ZIP with all folders!',
+              style: TextStyle(
+                color: Color(0xFF4CAF50),
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            SizedBox(height: 16),
+            Text(
+              '🎯 Then come back here:',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 8),
+            Text('Tap "Import ZIP" to import all folders!'),
+          ],
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, 'cancel'),
+            onPressed: () => Navigator.pop(context),
             child: const Text('Cancel'),
           ),
-          ElevatedButton.icon(
-            onPressed: () => Navigator.pop(context, 'import_zip'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF4CAF50),
-            ),
-            icon: const Icon(Icons.folder_zip),
-            label: const Text('Go to Import ZIP'),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _importZipFile();
+            },
+            child: const Text('Go to Import ZIP'),
           ),
         ],
       ),
     );
-
-    if (action == 'import_zip') {
-      _importZipFile();
-    }
   }
 
-  Widget _buildInstructionStep(String number, String text, IconData icon) {
-    return Row(
-      children: [
-        Container(
-          width: 28,
-          height: 28,
-          decoration: const BoxDecoration(
-            color: Color(0xFF4CAF50),
-            shape: BoxShape.circle,
+  Future<void> _compressAndImportFolder(String folderPath) async {
+    try {
+      final folderName = folderPath.split('/').last;
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Compressing "$folderName"...'),
+            duration: const Duration(seconds: 2),
           ),
-          child: Center(
-            child: Text(
-              number,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 12,
-              ),
+        );
+      }
+      
+      final archive = Archive();
+      await _addDirectoryToArchive(archive, folderPath, folderPath);
+      
+      if (archive.files.isEmpty) {
+        throw Exception('Folder is empty or inaccessible');
+      }
+      
+      final zipData = ZipEncoder().encode(archive);
+      if (zipData == null) {
+        throw Exception('Failed to compress folder');
+      }
+      
+      final action = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Folder Compressed!'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Compressed "$folderName"'),
+              Text('${archive.files.length} items'),
+              const SizedBox(height: 16),
+              const Text('What would you like to do?'),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'extract'),
+              child: const Text('Import Now (Extract)'),
             ),
-          ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'save'),
+              child: const Text('Save as ZIP'),
+            ),
+          ],
         ),
-        const SizedBox(width: 10),
-        Icon(icon, color: Colors.grey[600], size: 18),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            text,
-            style: const TextStyle(fontSize: 13),
-          ),
-        ),
-      ],
-    );
+      );
+      
+      if (action == 'extract') {
+        final docDir = await getApplicationDocumentsDirectory();
+        final targetDir = _currentNode?.path ?? docDir.path;
+        
+        int fileCount = 0;
+        int folderCount = 0;
+        
+        for (final file in archive.files) {
+          final filename = file.name;
+          final filePath = '$targetDir/$filename';
+          
+          if (file.isFile) {
+            final outFile = File(filePath);
+            await outFile.create(recursive: true);
+            await outFile.writeAsBytes(file.content as List<int>);
+            fileCount++;
+          } else {
+            await Directory(filePath).create(recursive: true);
+            folderCount++;
+          }
+        }
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Imported "$folderName"\n$fileCount files, $folderCount folders'),
+              duration: const Duration(seconds: 3),
+            ),
+          );
+          
+          if (_currentNode?.path != null) {
+            _navigateToNode(_currentNode!, addToBreadcrumb: false);
+          }
+        }
+      } else if (action == 'save') {
+        final docDir = await getApplicationDocumentsDirectory();
+        final targetDir = _currentNode?.path ?? docDir.path;
+        final zipPath = '$targetDir/$folderName.zip';
+        await File(zipPath).writeAsBytes(zipData);
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Saved as $folderName.zip')),
+          );
+          
+          if (_currentNode?.path != null) {
+            _navigateToNode(_currentNode!, addToBreadcrumb: false);
+          }
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    }
   }
 
   Future<void> _importAndAutoOrganize() async {
@@ -994,6 +1162,16 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         ),
         const PopupMenuDivider(),
         const PopupMenuItem<String>(
+          value: 'select',
+          child: Row(
+            children: [
+              Icon(Icons.check_circle_outline, size: 20, color: Color(0xFF4CAF50)),
+              SizedBox(width: 12),
+              Text('Select'),
+            ],
+          ),
+        ),
+        const PopupMenuItem<String>(
           value: 'rename',
           child: Row(
             children: [
@@ -1070,6 +1248,9 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         break;
       case 'info':
         _showFileInfo(node);
+        break;
+      case 'select':
+        _toggleSelectionMode(node);
         break;
       case 'rename':
         _showRenameDialog(node);
@@ -1369,9 +1550,48 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
                         ),
                       ),
                     ),
+                    if (_selectionMode && _selectedItems.isNotEmpty)
+                      IconButton(
+                        icon: const Icon(Icons.archive, color: Color(0xFF4CAF50)),
+                        tooltip: 'Compress Selected',
+                        onPressed: _compressSelected,
+                      ),
+                    if (_selectionMode)
+                      IconButton(
+                        icon: const Icon(Icons.close, color: Colors.red),
+                        tooltip: 'Cancel Selection',
+                        onPressed: () {
+                          setState(() {
+                            _selectionMode = false;
+                            _selectedItems.clear();
+                          });
+                        },
+                      ),
                     IconButton(
                       icon: Icon(_isGridView ? Icons.view_list : Icons.grid_view),
                       onPressed: () => setState(() => _isGridView = !_isGridView),
+                    ),
+                  ],
+                ),
+              ),
+            
+            if (_selectionMode)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                color: const Color(0xFFE8F5E9),
+                child: Row(
+                  children: [
+                    const Icon(Icons.check_circle, color: Color(0xFF4CAF50)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '${_selectedItems.length} item(s) selected',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: _compressSelected,
+                      child: const Text('COMPRESS'),
                     ),
                   ],
                 ),
@@ -1469,10 +1689,23 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
   }
 
   Widget _buildListTile(FileSystemNode node) {
+    final isSelected = _selectedItems.contains(node);
+    
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
+      color: isSelected ? const Color(0xFFE8F5E9) : null,
       child: ListTile(
-        leading: Icon(node.icon, color: node.iconColor, size: 32),
+        leading: Stack(
+          children: [
+            Icon(node.icon, color: node.iconColor, size: 32),
+            if (isSelected)
+              const Positioned(
+                right: 0,
+                bottom: 0,
+                child: Icon(Icons.check_circle, color: Color(0xFF4CAF50), size: 16),
+              ),
+          ],
+        ),
         title: Text(node.name),
         subtitle: node.fileSize != null
             ? Text('${_formatFileSize(node.fileSize!)} • ${_formatDate(node.modifiedDate!)}')
@@ -1494,40 +1727,57 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
             ),
           ],
         ),
-        onTap: () => _navigateToNode(node),
-        onLongPress: () {
-          final RenderBox box = context.findRenderObject() as RenderBox;
-          final Offset position = box.localToGlobal(Offset.zero);
-          _showContextMenu(context, node, position);
+        onTap: () {
+          if (_selectionMode) {
+            _toggleSelectionMode(node);
+          } else {
+            _navigateToNode(node);
+          }
         },
+        onLongPress: () => _toggleSelectionMode(node),
       ),
     );
   }
 
   Widget _buildGridTile(FileSystemNode node) {
+    final isSelected = _selectedItems.contains(node);
+    
     return GestureDetector(
-      onTap: () => _navigateToNode(node),
-      onLongPress: () {
-        final RenderBox box = context.findRenderObject() as RenderBox;
-        final Offset position = box.localToGlobal(Offset.zero);
-        _showContextMenu(context, node, position);
+      onTap: () {
+        if (_selectionMode) {
+          _toggleSelectionMode(node);
+        } else {
+          _navigateToNode(node);
+        }
       },
+      onLongPress: () => _toggleSelectionMode(node),
       child: Card(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+        color: isSelected ? const Color(0xFFE8F5E9) : null,
+        child: Stack(
           children: [
-            Icon(node.icon, size: 48, color: node.iconColor),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Text(
-                node.name,
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 12),
-              ),
+            Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(node.icon, size: 48, color: node.iconColor),
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Text(
+                    node.name,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+              ],
             ),
+            if (isSelected)
+              const Positioned(
+                top: 8,
+                right: 8,
+                child: Icon(Icons.check_circle, color: Color(0xFF4CAF50), size: 24),
+              ),
           ],
         ),
       ),
@@ -1611,7 +1861,7 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
                           ),
                         ),
                         subtitle: const Text(
-                          'Easy guide: Single folder OR bulk import multiple!\n⭐ Includes "Select All" method',
+                          'SELECT FOLDER → Auto-compress → Import\n⭐ Best for importing complete folders!',
                           style: TextStyle(fontSize: 12),
                         ),
                         trailing: const Icon(Icons.stars, color: Color(0xFFFFB300), size: 28),
@@ -1698,7 +1948,7 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
                     Container(
                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                       child: const Text(
-                        '📁 REGULAR IMPORT',
+                        '📄 REGULAR IMPORT',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
@@ -1844,5 +2094,174 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+}
+
+class _CompressDialog extends StatefulWidget {
+  final int itemCount;
+  final List<FileSystemEntity> items;
+
+  const _CompressDialog({
+    required this.itemCount,
+    required this.items,
+  });
+
+  @override
+  State<_CompressDialog> createState() => _CompressDialogState();
+}
+
+class _CompressDialogState extends State<_CompressDialog> {
+  late final TextEditingController _controller;
+  bool _isCalculating = true;
+  Map<String, dynamic>? _stats;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(
+      text: 'Archive_${DateTime.now().millisecondsSinceEpoch}',
+    );
+    _calculateStats();
+  }
+
+  Future<void> _calculateStats() async {
+    try {
+      final paths = widget.items.map((e) => e.path).toList();
+      final stats = await CompressionService.getCompressionStats(paths);
+      if (mounted) {
+        setState(() {
+          _stats = stats;
+          _isCalculating = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isCalculating = false;
+        });
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Row(
+        children: [
+          Icon(Icons.archive, color: Colors.deepPurple),
+          SizedBox(width: 8),
+          Text('Compress Selected'),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.blue,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              children: [
+                _buildStatRow(
+                  Icons.folder_outlined,
+                  'Items:',
+                  _isCalculating ? '...' : '${widget.itemCount} selected',
+                ),
+                if (_stats != null) ...[
+                  const SizedBox(height: 4),
+                  _buildStatRow(
+                    Icons.insert_drive_file_outlined,
+                    'Total Files:',
+                    '${_stats!['totalItems']} files',
+                  ),
+                  const SizedBox(height: 4),
+                  _buildStatRow(
+                    Icons.storage,
+                    'Total Size:',
+                    _stats!['formattedSize'],
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _controller,
+            decoration: const InputDecoration(
+              labelText: 'ZIP File Name',
+              suffixText: '.zip',
+              border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.file_present),
+            ),
+            autofocus: true,
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Icon(Icons.info_outline, size: 16, color: Colors.grey[600]),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Folder structure will be preserved',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[600],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton.icon(
+          onPressed: () => Navigator.pop(context, _controller.text),
+          icon: const Icon(Icons.check),
+          label: const Text('Compress'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.deepPurple,
+            foregroundColor: Colors.white,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatRow(IconData icon, String label, String value) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: Colors.white),
+        const SizedBox(width: 8),
+        Text(
+          label,
+          style: const TextStyle(
+            fontWeight: FontWeight.w500,
+            fontSize: 13,
+            color: Colors.white,
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 13,
+            color: Colors.white70,
+          ),
+        ),
+      ],
+    );
   }
 }

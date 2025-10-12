@@ -1,1 +1,125 @@
-import Foundationimport Compressionclass ZipUtility {        /// Compress files/folders into a ZIP using iOS-compatible APIs    /// Uses Compression framework instead of command-line tools    static func createZip(paths: [String], outputPath: String, preserveStructure: Bool = true) -> (success: Bool, error: String?) {                let fileManager = FileManager.default                // Validate all input paths exist        for path in paths {            if !fileManager.fileExists(atPath: path) {                return (false, "Path does not exist: \(path)")            }        }                // Delete existing output file if it exists        if fileManager.fileExists(atPath: outputPath) {            do {                try fileManager.removeItem(atPath: outputPath)            } catch {                return (false, "Could not remove existing file: \(error.localizedDescription)")            }        }                // Use SSZipArchive for iOS-compatible ZIP creation        // First, let's try using the Compression framework with custom implementation        do {            try createZipArchive(paths: paths, outputPath: outputPath, preserveStructure: preserveStructure)            return (true, nil)        } catch {            return (false, "ZIP creation failed: \(error.localizedDescription)")        }    }        /// Create ZIP archive using native iOS APIs    private static func createZipArchive(paths: [String], outputPath: String, preserveStructure: Bool) throws {        let fileManager = FileManager.default                // Create a temporary directory for staging files        let tempDir = NSTemporaryDirectory() + "zip_temp_\(UUID().uuidString)"        try fileManager.createDirectory(atPath: tempDir, withIntermediateDirectories: true)        defer {            try? fileManager.removeItem(atPath: tempDir)        }                // Get the base directory for relative paths        let baseDir: String        if preserveStructure && !paths.isEmpty {            baseDir = URL(fileURLWithPath: paths[0]).deletingLastPathComponent().path        } else {            baseDir = ""        }                // Collect all files to compress        var filesToCompress: [(sourcePath: String, relativePath: String)] = []                for path in paths {            let url = URL(fileURLWithPath: path)            var isDirectory: ObjCBool = false                        if fileManager.fileExists(atPath: path, isDirectory: &isDirectory) {                if isDirectory.boolValue {                    // Recursively get all files in directory                    let enumerator = fileManager.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey])                    while let fileURL = enumerator?.nextObject() as? URL {                        let attributes = try fileURL.resourceValues(forKeys: [.isRegularFileKey])                        if attributes.isRegularFile == true {                            let relativePath = preserveStructure ?                                fileURL.path.replacingOccurrences(of: baseDir + "/", with: "") :                                fileURL.lastPathComponent                            filesToCompress.append((fileURL.path, relativePath))                        }                    }                } else {                    // Single file                    let relativePath = preserveStructure ?                        url.lastPathComponent :                        url.lastPathComponent                    filesToCompress.append((path, relativePath))                }            }        }                // Create ZIP using DataCompression        try createZipUsingDataCompression(files: filesToCompress, outputPath: outputPath)    }        /// Create ZIP file using basic ZIP format specification    private static func createZipUsingDataCompression(files: [(sourcePath: String, relativePath: String)], outputPath: String) throws {        // For iOS, we'll use a simple approach: create an archive format manually        // Or use NSFileCoordinator with built-in compression                let fileManager = FileManager.default                // Use a simple workaround: Create a directory, copy files, then use FileManager compression        let tempArchiveDir = NSTemporaryDirectory() + "archive_\(UUID().uuidString)"        try fileManager.createDirectory(atPath: tempArchiveDir, withIntermediateDirectories: true)        defer {            try? fileManager.removeItem(atPath: tempArchiveDir)        }                // Copy all files maintaining structure        for (sourcePath, relativePath) in files {            let destPath = (tempArchiveDir as NSString).appendingPathComponent(relativePath)            let destURL = URL(fileURLWithPath: destPath)                        // Create parent directories            try fileManager.createDirectory(at: destURL.deletingLastPathComponent(),                                           withIntermediateDirectories: true)                        // Copy file            try fileManager.copyItem(atPath: sourcePath, toPath: destPath)        }                // Now create archive using Cocoa APIs        let coordinator = NSFileCoordinator()        var coordinatorError: NSError?        var archiveError: Error?                coordinator.coordinate(readingItemAt: URL(fileURLWithPath: tempArchiveDir),                              options: [.forUploading],                              error: &coordinatorError) { zipURL in            do {                // The system creates a zip at zipURL                try fileManager.copyItem(at: zipURL, to: URL(fileURLWithPath: outputPath))            } catch {                archiveError = error            }        }                if let error = coordinatorError ?? archiveError {            throw error        }    }        /// Get all items in a directory recursively    static func enumerateDirectory(at path: String) -> [String] {        let fileManager = FileManager.default        var items: [String] = []                guard let enumerator = fileManager.enumerator(atPath: path) else {            return items        }                for case let item as String in enumerator {            let fullPath = (path as NSString).appendingPathComponent(item)            items.append(fullPath)        }                return items    }        /// Get directory size recursively    static func getDirectorySize(at path: String) -> Int64 {        let fileManager = FileManager.default        var totalSize: Int64 = 0                guard let enumerator = fileManager.enumerator(            at: URL(fileURLWithPath: path),            includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey],            options: [.skipsHiddenFiles]        ) else {            return 0        }                for case let fileURL as URL in enumerator {            guard let resourceValues = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),                  let isRegularFile = resourceValues.isRegularFile,                  isRegularFile,                  let fileSize = resourceValues.fileSize else {                continue            }            totalSize += Int64(fileSize)        }                return totalSize    }        /// Count items in directory recursively    static func countItemsInDirectory(at path: String) -> Int {        let items = enumerateDirectory(at: path)        return items.count    }}
+<<<<<<< HEAD
+import Foundationimport Compressionclass ZipUtility {        /// Compress files/folders into a ZIP using iOS-compatible APIs    /// Uses Compression framework instead of command-line tools    static func createZip(paths: [String], outputPath: String, preserveStructure: Bool = true) -> (success: Bool, error: String?) {                let fileManager = FileManager.default                // Validate all input paths exist        for path in paths {            if !fileManager.fileExists(atPath: path) {                return (false, "Path does not exist: \(path)")            }        }                // Delete existing output file if it exists        if fileManager.fileExists(atPath: outputPath) {            do {                try fileManager.removeItem(atPath: outputPath)            } catch {                return (false, "Could not remove existing file: \(error.localizedDescription)")            }        }                // Use SSZipArchive for iOS-compatible ZIP creation        // First, let's try using the Compression framework with custom implementation        do {            try createZipArchive(paths: paths, outputPath: outputPath, preserveStructure: preserveStructure)            return (true, nil)        } catch {            return (false, "ZIP creation failed: \(error.localizedDescription)")        }    }        /// Create ZIP archive using native iOS APIs    private static func createZipArchive(paths: [String], outputPath: String, preserveStructure: Bool) throws {        let fileManager = FileManager.default                // Create a temporary directory for staging files        let tempDir = NSTemporaryDirectory() + "zip_temp_\(UUID().uuidString)"        try fileManager.createDirectory(atPath: tempDir, withIntermediateDirectories: true)        defer {            try? fileManager.removeItem(atPath: tempDir)        }                // Get the base directory for relative paths        let baseDir: String        if preserveStructure && !paths.isEmpty {            baseDir = URL(fileURLWithPath: paths[0]).deletingLastPathComponent().path        } else {            baseDir = ""        }                // Collect all files to compress        var filesToCompress: [(sourcePath: String, relativePath: String)] = []                for path in paths {            let url = URL(fileURLWithPath: path)            var isDirectory: ObjCBool = false                        if fileManager.fileExists(atPath: path, isDirectory: &isDirectory) {                if isDirectory.boolValue {                    // Recursively get all files in directory                    let enumerator = fileManager.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey])                    while let fileURL = enumerator?.nextObject() as? URL {                        let attributes = try fileURL.resourceValues(forKeys: [.isRegularFileKey])                        if attributes.isRegularFile == true {                            let relativePath = preserveStructure ?                                fileURL.path.replacingOccurrences(of: baseDir + "/", with: "") :                                fileURL.lastPathComponent                            filesToCompress.append((fileURL.path, relativePath))                        }                    }                } else {                    // Single file                    let relativePath = preserveStructure ?                        url.lastPathComponent :                        url.lastPathComponent                    filesToCompress.append((path, relativePath))                }            }        }                // Create ZIP using DataCompression        try createZipUsingDataCompression(files: filesToCompress, outputPath: outputPath)    }        /// Create ZIP file using basic ZIP format specification    private static func createZipUsingDataCompression(files: [(sourcePath: String, relativePath: String)], outputPath: String) throws {        // For iOS, we'll use a simple approach: create an archive format manually        // Or use NSFileCoordinator with built-in compression                let fileManager = FileManager.default                // Use a simple workaround: Create a directory, copy files, then use FileManager compression        let tempArchiveDir = NSTemporaryDirectory() + "archive_\(UUID().uuidString)"        try fileManager.createDirectory(atPath: tempArchiveDir, withIntermediateDirectories: true)        defer {            try? fileManager.removeItem(atPath: tempArchiveDir)        }                // Copy all files maintaining structure        for (sourcePath, relativePath) in files {            let destPath = (tempArchiveDir as NSString).appendingPathComponent(relativePath)            let destURL = URL(fileURLWithPath: destPath)                        // Create parent directories            try fileManager.createDirectory(at: destURL.deletingLastPathComponent(),                                           withIntermediateDirectories: true)                        // Copy file            try fileManager.copyItem(atPath: sourcePath, toPath: destPath)        }                // Now create archive using Cocoa APIs        let coordinator = NSFileCoordinator()        var coordinatorError: NSError?        var archiveError: Error?                coordinator.coordinate(readingItemAt: URL(fileURLWithPath: tempArchiveDir),                              options: [.forUploading],                              error: &coordinatorError) { zipURL in            do {                // The system creates a zip at zipURL                try fileManager.copyItem(at: zipURL, to: URL(fileURLWithPath: outputPath))            } catch {                archiveError = error            }        }                if let error = coordinatorError ?? archiveError {            throw error        }    }        /// Get all items in a directory recursively    static func enumerateDirectory(at path: String) -> [String] {        let fileManager = FileManager.default        var items: [String] = []                guard let enumerator = fileManager.enumerator(atPath: path) else {            return items        }                for case let item as String in enumerator {            let fullPath = (path as NSString).appendingPathComponent(item)            items.append(fullPath)        }                return items    }        /// Get directory size recursively    static func getDirectorySize(at path: String) -> Int64 {        let fileManager = FileManager.default        var totalSize: Int64 = 0                guard let enumerator = fileManager.enumerator(            at: URL(fileURLWithPath: path),            includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey],            options: [.skipsHiddenFiles]        ) else {            return 0        }                for case let fileURL as URL in enumerator {            guard let resourceValues = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),                  let isRegularFile = resourceValues.isRegularFile,                  isRegularFile,                  let fileSize = resourceValues.fileSize else {                continue            }            totalSize += Int64(fileSize)        }                return totalSize    }        /// Count items in directory recursively    static func countItemsInDirectory(at path: String) -> Int {        let items = enumerateDirectory(at: path)        return items.count    }}
+=======
+import Foundation
+
+class ZipUtility {
+    
+    /// Compress single or multiple files/folders into a ZIP
+    /// Uses the system zip utility for maximum compatibility
+    static func createZip(paths: [String], outputPath: String, preserveStructure: Bool = true) -> (success: Bool, error: String?) {
+        
+        let fileManager = FileManager.default
+        
+        // Validate all input paths exist
+        for path in paths {
+            if !fileManager.fileExists(atPath: path) {
+                return (false, "Path does not exist: \(path)")
+            }
+        }
+        
+        // Delete existing output file if it exists
+        if fileManager.fileExists(atPath: outputPath) {
+            do {
+                try fileManager.removeItem(atPath: outputPath)
+            } catch {
+                return (false, "Could not remove existing file: \(error.localizedDescription)")
+            }
+        }
+        
+        // Use system zip utility
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+        
+        var arguments = ["-r", "-q"] // recursive, quiet mode
+        arguments.append(outputPath)
+        
+        if preserveStructure {
+            // Get common parent directory
+            let firstPath = URL(fileURLWithPath: paths[0])
+            let parentDir = firstPath.deletingLastPathComponent()
+            task.currentDirectoryURL = parentDir
+            
+            // Add relative paths to preserve folder structure
+            for path in paths {
+                let url = URL(fileURLWithPath: path)
+                let relativePath = url.lastPathComponent
+                arguments.append(relativePath)
+            }
+        } else {
+            // Use absolute paths (flattens structure)
+            arguments.append(contentsOf: paths)
+        }
+        
+        task.arguments = arguments
+        
+        // Capture stderr for error messages
+        let errorPipe = Pipe()
+        task.standardError = errorPipe
+        
+        do {
+            try task.run()
+            task.waitUntilExit()
+            
+            if task.terminationStatus == 0 {
+                return (true, nil)
+            } else {
+                let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+                let errorMessage = String(data: errorData, encoding: .utf8) ?? "Unknown error"
+                return (false, "ZIP creation failed: \(errorMessage)")
+            }
+        } catch {
+            return (false, "Error executing zip command: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Get all items in a directory recursively
+    static func enumerateDirectory(at path: String) -> [String] {
+        let fileManager = FileManager.default
+        var items: [String] = []
+        
+        guard let enumerator = fileManager.enumerator(atPath: path) else {
+            return items
+        }
+        
+        for case let item as String in enumerator {
+            let fullPath = (path as NSString).appendingPathComponent(item)
+            items.append(fullPath)
+        }
+        
+        return items
+    }
+    
+    /// Get directory size recursively
+    static func getDirectorySize(at path: String) -> Int64 {
+        let fileManager = FileManager.default
+        var totalSize: Int64 = 0
+        
+        guard let enumerator = fileManager.enumerator(
+            at: URL(fileURLWithPath: path),
+            includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return 0
+        }
+        
+        for case let fileURL as URL in enumerator {
+            guard let resourceValues = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+                  let isRegularFile = resourceValues.isRegularFile,
+                  isRegularFile,
+                  let fileSize = resourceValues.fileSize else {
+                continue
+            }
+            totalSize += Int64(fileSize)
+        }
+        
+        return totalSize
+    }
+    
+    /// Count items in directory recursively
+    static func countItemsInDirectory(at path: String) -> Int {
+        let items = enumerateDirectory(at: path)
+        return items.count
+    }
+}
+>>>>>>> fa9065d49957c7bcd272dadea7b41a4b2f9ab31b
