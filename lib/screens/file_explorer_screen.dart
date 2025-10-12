@@ -2,7 +2,13 @@
 // ADD THIS IMPORT AT THE TOP
 // ========================================
 import 'package:file_vault_pro/services/compression_service.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'dart:io';
+import 'package:path/path.dart' as path;
+import 'package:file_vault_pro/services/compression_service.dart';
 
+// ... rest of your imports
 // ========================================
 // ADD THESE METHODS TO YOUR _FileExplorerScreenState CLASS
 // ========================================
