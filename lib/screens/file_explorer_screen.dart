@@ -8,6 +8,7 @@ import 'package:path/path.dart' as path;
 import '../models/file_system_models.dart';
 import '../widgets/common_widgets.dart';
 import '../services/compression_service.dart';
+import '../services/folder_picker_service.dart';
 
 class FileExplorerScreen extends StatefulWidget {
   const FileExplorerScreen({super.key});
@@ -268,14 +269,14 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
               ),
               SizedBox(height: 12),
-              Text('1️⃣ You\'ll select a folder from Files app'),
+              Text('1️⃣ Select a folder from Files app'),
               SizedBox(height: 8),
               Text('2️⃣ App will automatically compress it'),
               SizedBox(height: 8),
               Text('3️⃣ Import with full folder structure'),
               SizedBox(height: 16),
               Text(
-                '✨ Completely automatic!',
+                '✨ Uses native iOS folder picker!',
                 style: TextStyle(
                   color: Color(0xFF4CAF50),
                   fontWeight: FontWeight.bold,
@@ -304,25 +305,39 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         return;
       }
       
-      final directoryPath = await FilePicker.platform.getDirectoryPath();
+      // Use native iOS folder picker
+      final folderDetails = await FolderPickerService.pickFolderWithDetails();
       
-      if (directoryPath != null) {
-        await _compressAndImportFolder(directoryPath);
+      if (folderDetails != null) {
+        final folderPath = folderDetails['path'] as String;
+        final folderName = folderDetails['folderName'] as String;
+        
+        await _compressAndImportFolder(folderPath, customName: folderName);
       } else {
+        // User cancelled
         if (mounted) {
-          _showFolderImportFallbackDialog();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Folder selection cancelled'),
+              duration: Duration(seconds: 2),
+            ),
+          );
         }
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     } finally {
       setState(() => _isImporting = false);
     }
   }
+
 
   void _showFolderImportFallbackDialog() {
     showDialog(
@@ -391,9 +406,9 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     );
   }
 
-  Future<void> _compressAndImportFolder(String folderPath) async {
+  Future<void> _compressAndImportFolder(String folderPath, {String? customName}) async {
     try {
-      final folderName = folderPath.split('/').last;
+      final folderName = customName ?? folderPath.split('/').last;
       
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

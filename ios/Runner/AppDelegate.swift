@@ -28,6 +28,12 @@ import Flutter
             self.compressionHandler?.handle(call: call, result: result)
         }
         
+        // Register folder picker plugin
+        let registrar = self.registrar(forPlugin: "FolderPickerHandler")
+        if let registrar = registrar {
+            FolderPickerHandler.register(with: registrar)
+        }
+        
         GeneratedPluginRegistrant.register(with: self)
         return super.application(application, didFinishLaunchingWithOptions: launchOptions)
     }
