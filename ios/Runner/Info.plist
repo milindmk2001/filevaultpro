@@ -63,6 +63,8 @@
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+    
+    
 	
 	<!-- Supported File Types -->
 	<key>CFBundleDocumentTypes</key>
