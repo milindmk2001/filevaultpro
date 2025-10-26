@@ -5,8 +5,7 @@ import 'package:path_provider/path_provider.dart';
 import '../services/folder_picker_service.dart';
 import '../services/compression_service.dart';
 
-/// COMPLETE File Explorer Screen with Smart Folder Import
-/// Shows files from Documents/imports/ folder
+/// File Explorer Screen with Simplified Smart Folder Import
 class FileExplorerScreen extends StatefulWidget {
   const FileExplorerScreen({Key? key}) : super(key: key);
 
@@ -25,7 +24,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     _loadFiles();
   }
 
-  /// Load all files from Documents/imports folder
   Future<void> _loadFiles() async {
     setState(() => _isLoading = true);
 
@@ -33,14 +31,12 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
       final appDir = await getApplicationDocumentsDirectory();
       final importsDir = Directory(path.join(appDir.path, 'imports'));
 
-      // Create imports directory if it doesn't exist
       if (!await importsDir.exists()) {
         await importsDir.create(recursive: true);
       }
 
       _currentPath = importsDir.path;
 
-      // Get all files in imports directory
       final files = await importsDir
           .list()
           .where((entity) => entity is File)
@@ -60,15 +56,14 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     }
   }
 
-  /// Show Smart Folder Import dialog
   Future<void> _showSmartFolderImportDialog() async {
     final shouldProceed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: Row(
           children: [
-            Icon(Icons.folder_special, color: Colors.green),
-            SizedBox(width: 8),
+            Icon(Icons.folder_special, color: Colors.green, size: 28),
+            SizedBox(width: 12),
             Expanded(child: Text('Smart Folder Import')),
           ],
         ),
@@ -82,27 +77,27 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
               ),
               SizedBox(height: 12),
-              _buildStep(1, 'Files app will open with a green button'),
-              _buildStep(2, 'Navigate INTO the folder you want'),
-              _buildStep(3, 'Click "Select This Folder" button'),
-              _buildStep(4, 'App will auto-compress and import!'),
+              _buildStep(1, 'iOS Files app will open'),
+              _buildStep(2, 'Browse to find your folder'),
+              _buildStep(3, 'TAP on the folder to select it'),
+              _buildStep(4, 'App will compress and import!'),
               SizedBox(height: 16),
               Container(
                 padding: EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.green.shade50,
+                  color: Colors.blue.shade50,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.green.shade300),
+                  border: Border.all(color: Colors.blue.shade300),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.lightbulb_outline, color: Colors.green.shade700, size: 24),
+                    Icon(Icons.touch_app, color: Colors.blue.shade700, size: 24),
                     SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Navigate INSIDE the folder, then click the button!',
+                        'Browse to your folder, then TAP it to select!',
                         style: TextStyle(
-                          color: Colors.green.shade900,
+                          color: Colors.blue.shade900,
                           fontSize: 13,
                           fontWeight: FontWeight.w500,
                         ),
@@ -117,9 +112,9 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
                   Text('✨ ', style: TextStyle(fontSize: 18)),
                   Expanded(
                     child: Text(
-                      'Includes all subfolders automatically!',
+                      'All subfolders included automatically!',
                       style: TextStyle(
-                        color: Colors.blue,
+                        color: Colors.green.shade700,
                         fontWeight: FontWeight.bold,
                         fontSize: 13,
                       ),
@@ -191,7 +186,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     );
   }
 
-  /// Handle Smart Folder Import
   Future<void> _handleSmartFolderImport() async {
     try {
       // Show loading dialog
@@ -212,6 +206,9 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         ),
       );
 
+      // Small delay to show the dialog
+      await Future.delayed(Duration(milliseconds: 300));
+
       // Step 1: Pick folder
       final folderResult = await FolderPickerService.pickFolder();
 
@@ -219,7 +216,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
       if (mounted) Navigator.pop(context);
 
       if (folderResult == null) {
-        // User cancelled
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Folder selection cancelled')),
@@ -264,13 +260,11 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
       }
 
       // Step 2: Compress folder
-      // Save to Documents/imports/ folder
       final appDir = await getApplicationDocumentsDirectory();
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final zipFileName = '${folderName}_$timestamp.zip';
       final zipPath = path.join(appDir.path, 'imports', zipFileName);
 
-      // Ensure imports directory exists
       final importsDir = Directory(path.join(appDir.path, 'imports'));
       if (!await importsDir.exists()) {
         await importsDir.create(recursive: true);
@@ -285,11 +279,9 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
       if (mounted) Navigator.pop(context);
 
       if (compressionResult['success'] == true) {
-        // Success!
         final fileSize = compressionResult['size'] as int;
         final fileSizeMB = (fileSize / (1024 * 1024)).toStringAsFixed(2);
 
-        // Refresh file list
         await _loadFiles();
 
         if (mounted) {
@@ -332,12 +324,10 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         throw Exception('Compression failed');
       }
     } catch (e) {
-      // Close any open dialogs
       if (mounted) {
         Navigator.of(context).popUntil((route) => route.isFirst);
       }
 
-      // Show error
       _showErrorDialog('Import failed: $e');
     }
   }
@@ -410,7 +400,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
       ),
       body: Column(
         children: [
-          // Location indicator
           Container(
             width: double.infinity,
             padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -440,7 +429,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
             ),
           ),
 
-          // File list
           Expanded(
             child: _isLoading
                 ? Center(child: CircularProgressIndicator())
@@ -493,7 +481,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
                             subtitle: Text(_formatFileSize(fileSize)),
                             trailing: Icon(Icons.chevron_right),
                             onTap: () {
-                              // TODO: Handle file tap (extract, view, etc.)
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text('Tapped: $fileName'),
@@ -507,7 +494,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         ],
       ),
 
-      // Floating action button
       floatingActionButton: FloatingActionButton(
         onPressed: _showSmartFolderImportDialog,
         backgroundColor: Colors.green,
