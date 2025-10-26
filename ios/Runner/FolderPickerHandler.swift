@@ -2,7 +2,7 @@ import Flutter
 import UIKit
 import UniformTypeIdentifiers
 
-/// FINAL WORKING VERSION - Floating Button with Proper Directory Tracking
+/// FINAL WORKING VERSION - Auto-tracks current directory
 class FolderPickerHandler: NSObject {
     private static var channel: FlutterMethodChannel?
     private static var currentHandler: FolderPickerHandler?
@@ -90,12 +90,17 @@ class FolderPickerWrapperViewController: UIViewController {
     private var pickerViewController: UIDocumentPickerViewController?
     private var selectButton: UIButton!
     private var instructionLabel: UILabel!
-    private var lastSelectedURL: URL?
+    private var currentDirectoryURL: URL?
     
     override func viewDidLoad() {
         super.viewDidLoad()
         
         view.backgroundColor = .systemBackground
+        
+        // Set default to Documents directory
+        if let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            currentDirectoryURL = documentsURL
+        }
         
         setupInstructionBar()
         setupSelectButton()
@@ -104,20 +109,20 @@ class FolderPickerWrapperViewController: UIViewController {
     
     private func setupInstructionBar() {
         let instructionBar = UIView()
-        instructionBar.backgroundColor = .systemBlue.withAlphaComponent(0.1)
+        instructionBar.backgroundColor = .systemGreen.withAlphaComponent(0.1)
         instructionBar.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(instructionBar)
         
         let iconLabel = UILabel()
-        iconLabel.text = "ℹ️"
+        iconLabel.text = "✅"
         iconLabel.font = .systemFont(ofSize: 20)
         iconLabel.translatesAutoresizingMaskIntoConstraints = false
         instructionBar.addSubview(iconLabel)
         
         instructionLabel = UILabel()
-        instructionLabel.text = "Navigate INTO the folder you want, then tap the green button"
+        instructionLabel.text = "Browse to your folder, then tap the green button"
         instructionLabel.font = .systemFont(ofSize: 14, weight: .medium)
-        instructionLabel.textColor = .systemBlue
+        instructionLabel.textColor = .systemGreen
         instructionLabel.numberOfLines = 2
         instructionLabel.translatesAutoresizingMaskIntoConstraints = false
         instructionBar.addSubview(instructionLabel)
@@ -173,7 +178,6 @@ class FolderPickerWrapperViewController: UIViewController {
     }
     
     private func showDocumentPicker() {
-        // Create picker that allows browsing all locations
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder, .item])
         picker.delegate = self
         picker.allowsMultipleSelection = false
@@ -194,33 +198,20 @@ class FolderPickerWrapperViewController: UIViewController {
     }
     
     @objc private func selectButtonTapped() {
-        // Strategy: Use the last URL from any document selection
-        // OR try to get the current directory from the picker
-        
-        if let url = lastSelectedURL {
-            // If user tapped on any item, we have its URL
-            var folderURL = url
-            
-            // If they tapped a file, use its parent directory
-            var isDirectory: ObjCBool = false
-            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) {
-                if !isDirectory.boolValue {
-                    folderURL = url.deletingLastPathComponent()
-                }
-            }
-            
-            completionHandler?(folderURL)
-            dismiss(animated: true)
-        } else {
-            // No URL tracked - ask user to tap on something first
+        // Use the tracked current directory URL
+        guard let url = currentDirectoryURL else {
             let alert = UIAlertController(
-                title: "Tap on a Folder",
-                message: "Please tap on any folder or file in the list above. This helps us know which folder you want to select.",
+                title: "No Folder Selected",
+                message: "Please browse to a folder in the file browser above.",
                 preferredStyle: .alert
             )
             alert.addAction(UIAlertAction(title: "OK", style: .default))
             present(alert, animated: true)
+            return
         }
+        
+        completionHandler?(url)
+        dismiss(animated: true)
     }
     
     @objc private func cancelTapped() {
@@ -231,18 +222,24 @@ class FolderPickerWrapperViewController: UIViewController {
 
 extension FolderPickerWrapperViewController: UIDocumentPickerDelegate {
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-        // User tapped on something - remember this URL
-        if let url = urls.first {
-            lastSelectedURL = url
-            
-            // Don't dismiss - let them keep browsing or tap the green button
-            // This is the KEY: we track the tap but don't act on it yet
+        guard let url = urls.first else { return }
+        
+        // Update current directory based on what was tapped
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) {
+            if isDirectory.boolValue {
+                // User tapped a folder - update current directory to this folder
+                currentDirectoryURL = url
+            } else {
+                // User tapped a file - update current directory to its parent
+                currentDirectoryURL = url.deletingLastPathComponent()
+            }
         }
+        
+        // Don't dismiss picker - let user continue browsing or click green button
     }
     
     func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
-        // This is called when user taps Cancel in the picker
-        // But we don't want to cancel - we want them to use our green button
-        // So we do nothing here
+        // User navigating, not actually cancelling
     }
 }

@@ -5,7 +5,7 @@ import 'package:path_provider/path_provider.dart';
 import '../services/folder_picker_service.dart';
 import '../services/compression_service.dart';
 
-/// File Explorer Screen with Working Smart Folder Import
+/// File Explorer Screen - Final Working Version
 class FileExplorerScreen extends StatefulWidget {
   const FileExplorerScreen({Key? key}) : super(key: key);
 
@@ -77,29 +77,29 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
               ),
               SizedBox(height: 12),
-              _buildStep(1, 'Files app opens with a green button'),
-              _buildStep(2, 'Navigate INTO the folder you want'),
-              _buildStep(3, 'Tap on any file or folder inside'),
-              _buildStep(4, 'Click the green "Select This Folder" button'),
+              _buildStep(1, 'Files app opens with green button'),
+              _buildStep(2, 'Browse to your folder'),
+              _buildStep(3, 'Tap the green button to select'),
+              _buildStep(4, 'App auto-compresses and imports!'),
               SizedBox(height: 16),
               Container(
                 padding: EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.amber.shade50,
+                  color: Colors.green.shade50,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.amber.shade300),
+                  border: Border.all(color: Colors.green.shade300),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.touch_app, color: Colors.amber.shade900, size: 24),
+                    Icon(Icons.touch_app, color: Colors.green.shade700, size: 24),
                     SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Go inside the folder, tap any item, then click green button!',
+                        'Just browse and tap the green button!',
                         style: TextStyle(
-                          color: Colors.amber.shade900,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
+                          color: Colors.green.shade900,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ),
@@ -114,7 +114,7 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
                     child: Text(
                       'All subfolders included automatically!',
                       style: TextStyle(
-                        color: Colors.green.shade700,
+                        color: Colors.blue.shade700,
                         fontWeight: FontWeight.bold,
                         fontSize: 13,
                       ),
@@ -188,7 +188,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
 
   Future<void> _handleSmartFolderImport() async {
     try {
-      // Show loading dialog
       showDialog(
         context: context,
         barrierDismissible: false,
@@ -206,13 +205,10 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         ),
       );
 
-      // Small delay to show the dialog
       await Future.delayed(Duration(milliseconds: 300));
 
-      // Step 1: Pick folder
       final folderResult = await FolderPickerService.pickFolder();
 
-      // Close loading dialog
       if (mounted) Navigator.pop(context);
 
       if (folderResult == null) {
@@ -227,7 +223,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
       final folderPath = folderResult['path']!;
       final folderName = folderResult['name']!;
 
-      // Show compression progress
       if (mounted) {
         showDialog(
           context: context,
@@ -259,7 +254,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         );
       }
 
-      // Step 2: Compress folder
       final appDir = await getApplicationDocumentsDirectory();
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final zipFileName = '${folderName}_$timestamp.zip';
@@ -275,7 +269,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         destinationPath: zipPath,
       );
 
-      // Close compression dialog
       if (mounted) Navigator.pop(context);
 
       if (compressionResult['success'] == true) {
@@ -362,12 +355,8 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 
-  String _getFileExtension(String filePath) {
-    return path.extension(filePath).toLowerCase();
-  }
-
   IconData _getFileIcon(String filePath) {
-    final ext = _getFileExtension(filePath);
+    final ext = path.extension(filePath).toLowerCase();
     switch (ext) {
       case '.zip':
         return Icons.folder_zip;
