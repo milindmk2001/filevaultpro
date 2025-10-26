@@ -5,7 +5,7 @@ import 'package:path_provider/path_provider.dart';
 import '../services/folder_picker_service.dart';
 import '../services/compression_service.dart';
 
-/// File Explorer Screen with Simplified Smart Folder Import
+/// File Explorer Screen with Working Smart Folder Import
 class FileExplorerScreen extends StatefulWidget {
   const FileExplorerScreen({Key? key}) : super(key: key);
 
@@ -77,27 +77,27 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
               ),
               SizedBox(height: 12),
-              _buildStep(1, 'iOS Files app will open'),
-              _buildStep(2, 'Browse to find your folder'),
-              _buildStep(3, 'TAP on the folder to select it'),
-              _buildStep(4, 'App will compress and import!'),
+              _buildStep(1, 'Files app opens with a green button'),
+              _buildStep(2, 'Navigate INTO the folder you want'),
+              _buildStep(3, 'Tap on any file or folder inside'),
+              _buildStep(4, 'Click the green "Select This Folder" button'),
               SizedBox(height: 16),
               Container(
                 padding: EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
+                  color: Colors.amber.shade50,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blue.shade300),
+                  border: Border.all(color: Colors.amber.shade300),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.touch_app, color: Colors.blue.shade700, size: 24),
+                    Icon(Icons.touch_app, color: Colors.amber.shade900, size: 24),
                     SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Browse to your folder, then TAP it to select!',
+                        'Go inside the folder, tap any item, then click green button!',
                         style: TextStyle(
-                          color: Colors.blue.shade900,
+                          color: Colors.amber.shade900,
                           fontSize: 13,
                           fontWeight: FontWeight.w500,
                         ),
