@@ -2,38 +2,38 @@ import Flutter
 import UIKit
 import UniformTypeIdentifiers
 
-/// SIMPLIFIED - Native iOS Folder Selection
-/// Uses standard iOS picker without custom floating button
-/// More reliable and follows iOS patterns
+/// PROPERLY FIXED - Native iOS Folder Selection with Instance Delegate
 class FolderPickerHandler: NSObject {
     private static var channel: FlutterMethodChannel?
-    private static var result: FlutterResult?
+    private static var currentHandler: FolderPickerHandler?
+    private var result: FlutterResult?
     
     static func register(with messenger: FlutterBinaryMessenger) {
         channel = FlutterMethodChannel(name: "com.filevaultpro/folder_picker", binaryMessenger: messenger)
         
         channel?.setMethodCallHandler { (call: FlutterMethodCall, result: @escaping FlutterResult) in
-            self.result = result
-            
             if call.method == "pickFolder" {
-                self.pickFolder()
+                let handler = FolderPickerHandler()
+                handler.result = result
+                currentHandler = handler
+                handler.pickFolder()
             } else {
                 result(FlutterMethodNotImplemented)
             }
         }
     }
     
-    private static func pickFolder() {
+    private func pickFolder() {
         DispatchQueue.main.async {
             guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
                   let window = windowScene.windows.first,
                   let rootViewController = window.rootViewController else {
-                result?(FlutterError(code: "NO_VIEW_CONTROLLER", message: "Cannot find view controller", details: nil))
+                self.result?(FlutterError(code: "NO_VIEW_CONTROLLER", message: "Cannot find view controller", details: nil))
                 return
             }
             
             // Create document picker for folder selection
-            // Key: Use .folder type only, which makes tapping a folder SELECT it (not open it)
+            // Using .folder type only makes tapping a folder SELECT it (not open it)
             let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder])
             picker.delegate = self
             picker.allowsMultipleSelection = false
@@ -48,7 +48,7 @@ class FolderPickerHandler: NSObject {
         }
     }
     
-    private static func handleFolderSelection(url: URL) {
+    private func handleFolderSelection(url: URL) {
         guard url.startAccessingSecurityScopedResource() else {
             result?(FlutterError(code: "ACCESS_DENIED", message: "Cannot access folder", details: nil))
             return
@@ -76,14 +76,16 @@ class FolderPickerHandler: NSObject {
         }
         
         result = nil
+        FolderPickerHandler.currentHandler = nil
     }
 }
 
 extension FolderPickerHandler: UIDocumentPickerDelegate {
-    static func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
         guard let url = urls.first else {
             result?(FlutterError(code: "NO_FOLDER", message: "No folder selected", details: nil))
             result = nil
+            FolderPickerHandler.currentHandler = nil
             return
         }
         
@@ -95,15 +97,18 @@ extension FolderPickerHandler: UIDocumentPickerDelegate {
             } else {
                 result?(FlutterError(code: "NOT_FOLDER", message: "Selected item is not a folder", details: nil))
                 result = nil
+                FolderPickerHandler.currentHandler = nil
             }
         } else {
             result?(FlutterError(code: "NOT_FOUND", message: "Selected folder not found", details: nil))
             result = nil
+            FolderPickerHandler.currentHandler = nil
         }
     }
     
-    static func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+    func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
         result?(FlutterError(code: "PICKER_CANCELLED", message: "User cancelled", details: nil))
         result = nil
+        FolderPickerHandler.currentHandler = nil
     }
 }
