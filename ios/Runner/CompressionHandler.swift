@@ -1,270 +1,125 @@
-import Foundation
 import Flutter
 import SSZipArchive
 
 class CompressionHandler: NSObject {
+    private static var channel: FlutterMethodChannel?
     
-    /// Handle method channel calls from Flutter
-    func handle(call: FlutterMethodCall, result: @escaping FlutterResult) {
-        switch call.method {
-        case "compressFolders":
-            compressFolders(call: call, result: result)
-        case "getDirectorySize":
-            getDirectorySize(call: call, result: result)
-        case "countItems":
-            countItems(call: call, result: result)
-        default:
-            result(FlutterMethodNotImplemented)
+    static func register(with messenger: FlutterBinaryMessenger) {
+        channel = FlutterMethodChannel(name: "com.filevaultpro/compression", binaryMessenger: messenger)
+        
+        channel?.setMethodCallHandler { (call: FlutterMethodCall, result: @escaping FlutterResult) in
+            if call.method == "compressFolder" {
+                guard let args = call.arguments as? [String: Any],
+                      let sourcePath = args["sourcePath"] as? String,
+                      let destinationPath = args["destinationPath"] as? String else {
+                    result(FlutterError(code: "INVALID_ARGUMENTS", message: "Missing required arguments", details: nil))
+                    return
+                }
+                
+                self.compressFolder(sourcePath: sourcePath, destinationPath: destinationPath, result: result)
+            } else if call.method == "extractZip" {
+                guard let args = call.arguments as? [String: Any],
+                      let zipPath = args["zipPath"] as? String,
+                      let destinationPath = args["destinationPath"] as? String else {
+                    result(FlutterError(code: "INVALID_ARGUMENTS", message: "Missing required arguments", details: nil))
+                    return
+                }
+                
+                self.extractZip(zipPath: zipPath, destinationPath: destinationPath, result: result)
+            } else {
+                result(FlutterMethodNotImplemented)
+            }
         }
     }
     
-    // MARK: - Compression
-    
-    private func compressFolders(call: FlutterMethodCall, result: @escaping FlutterResult) {
-        guard let args = call.arguments as? [String: Any],
-              let paths = args["paths"] as? [String],
-              let outputPath = args["outputPath"] as? String else {
-            result(FlutterError(
-                code: "INVALID_ARGS",
-                message: "Missing required arguments: paths or outputPath",
-                details: nil
-            ))
-            return
-        }
-        
-        let preserveStructure = args["preserveStructure"] as? Bool ?? true
-        
-        // Validate paths exist
-        for path in paths {
-            if !FileManager.default.fileExists(atPath: path) {
-                result(FlutterError(
-                    code: "FILE_NOT_FOUND",
-                    message: "Path does not exist: \(path)",
-                    details: nil
-                ))
+    private static func compressFolder(sourcePath: String, destinationPath: String, result: @escaping FlutterResult) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let sourceURL = URL(fileURLWithPath: sourcePath)
+            let destinationURL = URL(fileURLWithPath: destinationPath)
+            
+            // Ensure source exists
+            guard FileManager.default.fileExists(atPath: sourcePath) else {
+                DispatchQueue.main.async {
+                    result(FlutterError(code: "SOURCE_NOT_FOUND", message: "Source folder does not exist", details: nil))
+                }
                 return
             }
-        }
-        
-        // Perform compression in background
-        DispatchQueue.global(qos: .userInitiated).async {
-            do {
-                let success = try self.createZipArchive(
-                    paths: paths,
-                    outputPath: outputPath,
-                    preserveStructure: preserveStructure
-                )
-                
-                DispatchQueue.main.async {
-                    if success {
-                        result([
-                            "success": true,
-                            "path": outputPath,
-                            "message": "Compression completed successfully"
-                        ])
-                    } else {
-                        result(FlutterError(
-                            code: "COMPRESSION_FAILED",
-                            message: "Failed to create zip archive",
-                            details: nil
-                        ))
+            
+            // Create destination directory if it doesn't exist
+            let destinationDir = destinationURL.deletingLastPathComponent()
+            if !FileManager.default.fileExists(atPath: destinationDir.path) {
+                do {
+                    try FileManager.default.createDirectory(at: destinationDir, withIntermediateDirectories: true, attributes: nil)
+                } catch {
+                    DispatchQueue.main.async {
+                        result(FlutterError(code: "DIRECTORY_CREATION_FAILED", message: error.localizedDescription, details: nil))
                     }
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    result(FlutterError(
-                        code: "COMPRESSION_ERROR",
-                        message: error.localizedDescription,
-                        details: nil
-                    ))
+                    return
                 }
             }
-        }
-    }
-    
-    private func createZipArchive(paths: [String], outputPath: String, preserveStructure: Bool) throws -> Bool {
-        // Delete existing zip if it exists
-        if FileManager.default.fileExists(atPath: outputPath) {
-            try FileManager.default.removeItem(atPath: outputPath)
-        }
-        
-        // Create zip archive
-        let success = SSZipArchive.createZipFile(
-            atPath: outputPath,
-            withContentsOfDirectory: "", // We'll add files manually
-            keepParentDirectory: preserveStructure
-        )
-        
-        guard success else {
-            return false
-        }
-        
-        // Add each path to the archive
-        return try addPathsToZip(paths: paths, zipPath: outputPath, preserveStructure: preserveStructure)
-    }
-    
-    private func addPathsToZip(paths: [String], zipPath: String, preserveStructure: Bool) throws -> Bool {
-        // For multiple paths, we need to add them individually
-        // This requires using SSZipArchive's addFileToZip method
-        
-        var filesToAdd: [String] = []
-        
-        for sourcePath in paths {
-            var isDirectory: ObjCBool = false
-            FileManager.default.fileExists(atPath: sourcePath, isDirectory: &isDirectory)
             
-            if isDirectory.boolValue {
-                // Get all files in directory
-                let files = try getFilesRecursively(in: sourcePath)
-                filesToAdd.append(contentsOf: files)
-            } else {
-                // Single file
-                filesToAdd.append(sourcePath)
+            // Delete existing zip if it exists
+            if FileManager.default.fileExists(atPath: destinationPath) {
+                try? FileManager.default.removeItem(atPath: destinationPath)
             }
-        }
-        
-        // Create zip with all collected files
-        let success = SSZipArchive.createZipFile(
-            atPath: zipPath,
-            withFilesAtPaths: filesToAdd
-        )
-        
-        return success
-    }
-    
-    private func getFilesRecursively(in directory: String) throws -> [String] {
-        var files: [String] = []
-        let fileManager = FileManager.default
-        
-        guard let enumerator = fileManager.enumerator(atPath: directory) else {
-            throw NSError(
-                domain: "CompressionHandler",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to enumerate directory"]
-            )
-        }
-        
-        while let relativePath = enumerator.nextObject() as? String {
-            let fullPath = (directory as NSString).appendingPathComponent(relativePath)
-            var isDirectory: ObjCBool = false
             
-            if fileManager.fileExists(atPath: fullPath, isDirectory: &isDirectory) {
-                if !isDirectory.boolValue {
-                    files.append(fullPath)
+            // Compress folder
+            let success = SSZipArchive.createZipFile(atPath: destinationPath, withContentsOfDirectory: sourcePath)
+            
+            DispatchQueue.main.async {
+                if success {
+                    // Get file size
+                    if let attributes = try? FileManager.default.attributesOfItem(atPath: destinationPath),
+                       let fileSize = attributes[.size] as? UInt64 {
+                        let response: [String: Any] = [
+                            "success": true,
+                            "zipPath": destinationPath,
+                            "size": fileSize
+                        ]
+                        result(response)
+                    } else {
+                        result(["success": true, "zipPath": destinationPath])
+                    }
+                } else {
+                    result(FlutterError(code: "COMPRESSION_FAILED", message: "Failed to compress folder", details: nil))
                 }
             }
         }
-        
-        return files
     }
     
-    // MARK: - Directory Size
-    
-    private func getDirectorySize(call: FlutterMethodCall, result: @escaping FlutterResult) {
-        guard let args = call.arguments as? [String: Any],
-              let path = args["path"] as? String else {
-            result(FlutterError(
-                code: "INVALID_ARGS",
-                message: "Missing required argument: path",
-                details: nil
-            ))
-            return
-        }
-        
+    private static func extractZip(zipPath: String, destinationPath: String, result: @escaping FlutterResult) {
         DispatchQueue.global(qos: .userInitiated).async {
-            do {
-                let size = try self.calculateDirectorySize(at: path)
+            // Ensure zip exists
+            guard FileManager.default.fileExists(atPath: zipPath) else {
                 DispatchQueue.main.async {
-                    result(size)
+                    result(FlutterError(code: "ZIP_NOT_FOUND", message: "ZIP file does not exist", details: nil))
                 }
-            } catch {
-                DispatchQueue.main.async {
-                    result(FlutterError(
-                        code: "SIZE_CALCULATION_ERROR",
-                        message: error.localizedDescription,
-                        details: nil
-                    ))
-                }
+                return
             }
-        }
-    }
-    
-    private func calculateDirectorySize(at path: String) throws -> Int64 {
-        var totalSize: Int64 = 0
-        let fileManager = FileManager.default
-        
-        guard let enumerator = fileManager.enumerator(atPath: path) else {
-            throw NSError(
-                domain: "CompressionHandler",
-                code: 2,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to enumerate directory"]
-            )
-        }
-        
-        while let relativePath = enumerator.nextObject() as? String {
-            let fullPath = (path as NSString).appendingPathComponent(relativePath)
             
-            do {
-                let attributes = try fileManager.attributesOfItem(atPath: fullPath)
-                if let fileSize = attributes[.size] as? Int64 {
-                    totalSize += fileSize
+            // Create destination directory if it doesn't exist
+            let destinationURL = URL(fileURLWithPath: destinationPath)
+            if !FileManager.default.fileExists(atPath: destinationPath) {
+                do {
+                    try FileManager.default.createDirectory(at: destinationURL, withIntermediateDirectories: true, attributes: nil)
+                } catch {
+                    DispatchQueue.main.async {
+                        result(FlutterError(code: "DIRECTORY_CREATION_FAILED", message: error.localizedDescription, details: nil))
+                    }
+                    return
                 }
-            } catch {
-                // Skip files that can't be accessed
-                continue
             }
-        }
-        
-        return totalSize
-    }
-    
-    // MARK: - Count Items
-    
-    private func countItems(call: FlutterMethodCall, result: @escaping FlutterResult) {
-        guard let args = call.arguments as? [String: Any],
-              let path = args["path"] as? String else {
-            result(FlutterError(
-                code: "INVALID_ARGS",
-                message: "Missing required argument: path",
-                details: nil
-            ))
-            return
-        }
-        
-        DispatchQueue.global(qos: .userInitiated).async {
-            do {
-                let count = try self.countItemsInDirectory(at: path)
-                DispatchQueue.main.async {
-                    result(count)
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    result(FlutterError(
-                        code: "COUNT_ERROR",
-                        message: error.localizedDescription,
-                        details: nil
-                    ))
+            
+            // Extract zip
+            let success = SSZipArchive.unzipFile(atPath: zipPath, toDestination: destinationPath)
+            
+            DispatchQueue.main.async {
+                if success {
+                    result(["success": true, "extractedPath": destinationPath])
+                } else {
+                    result(FlutterError(code: "EXTRACTION_FAILED", message: "Failed to extract ZIP file", details: nil))
                 }
             }
         }
-    }
-    
-    private func countItemsInDirectory(at path: String) throws -> Int {
-        let fileManager = FileManager.default
-        
-        guard let enumerator = fileManager.enumerator(atPath: path) else {
-            throw NSError(
-                domain: "CompressionHandler",
-                code: 3,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to enumerate directory"]
-            )
-        }
-        
-        var count = 0
-        while enumerator.nextObject() != nil {
-            count += 1
-        }
-        
-        return count
     }
 }

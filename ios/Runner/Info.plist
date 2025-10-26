@@ -13,7 +13,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>file_vault_pro</string>
+	<string>filevaultpro</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -41,6 +41,8 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<false/>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
@@ -48,39 +50,43 @@
 	
 	<!-- File Access Permissions -->
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>FileVault Pro needs access to your photos to manage and organize your media files</string>
+	<string>FileVault Pro needs access to your photos to import and manage images securely.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>FileVault Pro needs permission to save photos to your library</string>
+	<string>FileVault Pro needs permission to save photos to your library.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>FileVault Pro needs camera access to capture photos and videos</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>FileVault Pro needs microphone access to record audio</string>
+	<string>FileVault Pro needs camera access to capture photos and documents.</string>
 	
-	<!-- Document Access -->
+	<!-- Document Types -->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Folders</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.folder</string>
+			</array>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>All Files</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.item</string>
+			</array>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+		</dict>
+	</array>
+	
+	<!-- File Sharing -->
 	<key>UISupportsDocumentBrowser</key>
 	<true/>
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
-    
-    
-	
-	<!-- Supported File Types -->
-	<key>CFBundleDocumentTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleTypeName</key>
-			<string>All Files</string>
-			<key>LSHandlerRank</key>
-			<string>Alternate</string>
-			<key>LSItemContentTypes</key>
-			<array>
-				<string>public.item</string>
-				<string>public.content</string>
-				<string>public.data</string>
-			</array>
-		</dict>
-	</array>
 </dict>
 </plist>

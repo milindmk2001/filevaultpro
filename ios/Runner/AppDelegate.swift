@@ -1,38 +1,20 @@
 import UIKit
 import Flutter
 
-@UIApplicationMain
+@main
 @objc class AppDelegate: FlutterAppDelegate {
-    private var compressionHandler: CompressionHandler?
-    
     override func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
-        let controller = window?.rootViewController as! FlutterViewController
         
-        // Setup compression method channel
-        let compressionChannel = FlutterMethodChannel(
-            name: "com.filevaultpro/compression",
-            binaryMessenger: controller.binaryMessenger
-        )
+        let controller: FlutterViewController = window?.rootViewController as! FlutterViewController
         
-        compressionHandler = CompressionHandler()
+        // Register Folder Picker Handler
+        FolderPickerHandler.register(with: controller.binaryMessenger)
         
-        compressionChannel.setMethodCallHandler { [weak self] (call: FlutterMethodCall, result: @escaping FlutterResult) in
-            guard let self = self else {
-                result(FlutterError(code: "UNAVAILABLE", message: "Handler not available", details: nil))
-                return
-            }
-            
-            self.compressionHandler?.handle(call: call, result: result)
-        }
-        
-        // Register folder picker plugin
-        let registrar = self.registrar(forPlugin: "FolderPickerHandler")
-        if let registrar = registrar {
-            FolderPickerHandler.register(with: registrar)
-        }
+        // Register Compression Handler
+        CompressionHandler.register(with: controller.binaryMessenger)
         
         GeneratedPluginRegistrant.register(with: self)
         return super.application(application, didFinishLaunchingWithOptions: launchOptions)

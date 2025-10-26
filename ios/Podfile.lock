@@ -81,13 +81,13 @@ SPEC CHECKSUMS:
   DKPhotoGallery: b3834fecb755ee09a593d7c9e389d8b5d6deed60
   file_picker: a0560bc09d61de87f12d246fc47d2119e6ef37be
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
-  image_picker_ios: 7fe1ff8e34c1790d6fff70a32484959f563a928a
-  path_provider_foundation: 080d55be775b7414fd5a5ef3ac137b97b097e564
+  image_picker_ios: e0ece4aa2a75771a7de3fa735d26d90817041326
+  path_provider_foundation: bb55f6dbba17d0dccd6737fe6f7f34fbd0376880
   photo_manager: 1d80ae07a89a67dfbcae95953a1e5a24af7c3e62
   SDWebImage: 16309af6d214ba3f77a7c6f6fdda888cb313a50a
   SSZipArchive: fe6a26b2a54d5a0890f2567b5cc6de5caa600aef
   SwiftyGif: 706c60cf65fa2bc5ee0313beece843c8eb8194d4
 
-PODFILE CHECKSUM: be8d6fc3e65cae8bea4be5e201010b33f1e64284
+PODFILE CHECKSUM: 93d0f85d50fb060b29c5fc0ff8b0258bbf150bb8
 
 COCOAPODS: 1.16.2
