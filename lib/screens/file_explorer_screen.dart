@@ -2,11 +2,11 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
-import 'package:file_picker/file_picker.dart';
 import '../services/folder_picker_service.dart';
 import '../services/compression_service.dart';
 
 /// Enhanced File Explorer - iOS Files App Style + Smart Import
+/// No file_picker dependency - uses native iOS picker through FolderPickerService
 class FileExplorerScreen extends StatefulWidget {
   const FileExplorerScreen({Key? key}) : super(key: key);
 
@@ -111,27 +111,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         _currentDirectory = previousDir;
       });
       _loadDirectory(previousDir);
-    }
-  }
-
-  Future<void> _openSystemFilePicker() async {
-    try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        allowMultiple: false,
-        type: FileType.any,
-      );
-
-      if (result != null && result.files.isNotEmpty) {
-        final file = result.files.first;
-        _showFileInfoDialog(
-          file.name,
-          file.size,
-          file.path ?? 'Unknown',
-          path.extension(file.name),
-        );
-      }
-    } catch (e) {
-      _showError('Failed to open file picker: $e');
     }
   }
 
@@ -559,14 +538,14 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
           'Access your iCloud files',
           Icons.cloud,
           Colors.blue,
-          () => _showError('iCloud Drive requires additional setup'),
+          () => _showError('Use Smart Folder Import (+ button) to access iCloud files'),
         ),
         _buildLocationTile(
           'On My iPhone',
           'Files stored on this device',
           Icons.phone_iphone,
           Colors.blue,
-          () => _openSystemFilePicker(),
+          () => _showError('Use Smart Folder Import (+ button) to access device files'),
         ),
         _buildLocationTile(
           'Documents',
@@ -585,7 +564,7 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
           'Downloaded files',
           Icons.download,
           Colors.blue,
-          () => _showError('Downloads folder requires iOS file picker'),
+          () => _showError('Use Smart Folder Import (+ button) to access downloads'),
         ),
         SizedBox(height: 16),
         _buildSectionHeader('My Imports'),

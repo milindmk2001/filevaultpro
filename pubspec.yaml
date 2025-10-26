@@ -13,7 +13,6 @@ dependencies:
 
   cupertino_icons: ^1.0.8
   provider: ^6.1.2
-  file_picker: ^6.1.1
   path_provider: ^2.1.1
   fl_chart: ^1.1.1
   percent_indicator: ^4.2.3
