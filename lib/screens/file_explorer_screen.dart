@@ -8,6 +8,7 @@ import '../services/folder_picker_service.dart';
 import '../services/compression_service.dart';
 
 /// Enhanced File Explorer - Full Browse + File Opening + Smart Import
+/// Fixed: Copies files to temp before opening (iOS security)
 class FileExplorerScreen extends StatefulWidget {
   const FileExplorerScreen({Key? key}) : super(key: key);
 
@@ -144,7 +145,7 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
               _buildBrowseStep('📁 Browse all locations'),
               _buildBrowseStep('👀 Select files to view'),
               _buildBrowseStep('📂 Navigate folders'),
-              _buildBrowseStep('🔍 See file details'),
+              _buildBrowseStep('📤 Open or share files'),
               SizedBox(height: 16),
               Container(
                 padding: EdgeInsets.all(12),
@@ -159,7 +160,7 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
                     SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Select a file to see options including Open and Share!',
+                        'Files will be copied to app storage before opening (iOS security requirement)',
                         style: TextStyle(
                           color: Colors.blue.shade900,
                           fontSize: 12,
@@ -234,23 +235,73 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
       if (mounted) Navigator.pop(context);
 
       if (folderResult != null) {
-        final folderPath = folderResult['path']!;
-        final folderName = folderResult['name']!;
+        final selectedPath = folderResult['path']!;
+        final selectedName = folderResult['name']!;
         
         // Check if it's a file or folder
-        final entity = FileSystemEntity.typeSync(folderPath);
+        final entity = FileSystemEntity.typeSync(selectedPath);
         if (entity == FileSystemEntityType.file) {
-          // It's a file - show file options
-          final file = File(folderPath);
-          _showFileOptionsDialog(file);
+          // It's a file - copy to temp and show options
+          await _handleBrowsedFile(selectedPath, selectedName);
         } else {
           // It's a folder - show folder info
-          _showBrowseResultDialog(folderName, folderPath);
+          _showBrowseResultDialog(selectedName, selectedPath);
         }
       }
     } catch (e) {
       if (mounted) Navigator.pop(context);
       _showError('Failed to open browser: $e');
+    }
+  }
+
+  Future<void> _handleBrowsedFile(String originalPath, String fileName) async {
+    try {
+      // Show copying dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => WillPopScope(
+          onWillPop: () async => false,
+          child: AlertDialog(
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text('Preparing file...'),
+                SizedBox(height: 8),
+                Text(
+                  fileName,
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      // Copy file to temp directory
+      final tempDir = await getTemporaryDirectory();
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final tempFileName = '${timestamp}_$fileName';
+      final tempFilePath = path.join(tempDir.path, tempFileName);
+
+      // Read source file
+      final sourceFile = File(originalPath);
+      final bytes = await sourceFile.readAsBytes();
+      
+      // Write to temp
+      final tempFile = File(tempFilePath);
+      await tempFile.writeAsBytes(bytes);
+
+      if (mounted) Navigator.pop(context);
+
+      // Show file options with temp file
+      _showFileOptionsDialog(tempFile, isFromBrowser: true);
+    } catch (e) {
+      if (mounted) Navigator.pop(context);
+      _showError('Failed to prepare file: $e');
     }
   }
 
@@ -328,11 +379,11 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     if (item is Directory) {
       _loadDirectory(item);
     } else if (item is File) {
-      _showFileOptionsDialog(item);
+      _showFileOptionsDialog(item, isFromBrowser: false);
     }
   }
 
-  Future<void> _showFileOptionsDialog(File file) async {
+  Future<void> _showFileOptionsDialog(File file, {required bool isFromBrowser}) async {
     final fileName = path.basename(file.path);
     final fileSize = file.lengthSync();
     final fileExt = path.extension(file.path);
@@ -361,7 +412,31 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
               SizedBox(height: 8),
               _buildFileInfoRow(Icons.description, 'Type', fileExt.isNotEmpty ? fileExt : 'Unknown'),
               SizedBox(height: 8),
-              _buildFileInfoRow(Icons.location_on, 'Location', path.dirname(file.path)),
+              _buildFileInfoRow(Icons.location_on, 'Location', 
+                isFromBrowser ? 'Temporary (copied from device)' : path.dirname(file.path)),
+              if (isFromBrowser) ...[
+                SizedBox(height: 12),
+                Container(
+                  padding: EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.shade50,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.orange.shade300),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline, size: 16, color: Colors.orange.shade700),
+                      SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'File copied to app storage for opening',
+                          style: TextStyle(fontSize: 11, color: Colors.orange.shade900),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               SizedBox(height: 16),
               Container(
                 padding: EdgeInsets.all(12),
@@ -457,6 +532,8 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
                   fontSize: 14,
                   fontWeight: FontWeight.w500,
                 ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),
@@ -487,6 +564,7 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         ),
       );
 
+      // Small delay to ensure file is ready
       await Future.delayed(Duration(milliseconds: 500));
 
       final result = await OpenFilex.open(file.path);
@@ -498,7 +576,7 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         
         switch (result.type) {
           case ResultType.noAppToOpen:
-            message = 'No app installed to open this file type';
+            message = 'No app installed to open this file type.\n\nTry using the Share button to open in another app.';
             break;
           case ResultType.fileNotFound:
             message = 'File not found';
@@ -507,7 +585,7 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
             message = 'Permission denied';
             break;
           case ResultType.error:
-            message = 'Error opening file: ${result.message}';
+            message = 'Error: ${result.message}';
             break;
           default:
             message = 'Could not open file';
@@ -1118,7 +1196,7 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
                           title: Text(fileName, style: TextStyle(fontWeight: FontWeight.w500)),
                           subtitle: Text(_formatBytes(fileSize)),
                           trailing: Icon(Icons.more_vert, color: Colors.grey),
-                          onTap: () => _showFileOptionsDialog(file),
+                          onTap: () => _showFileOptionsDialog(file, isFromBrowser: false),
                         );
                       },
                     ),
