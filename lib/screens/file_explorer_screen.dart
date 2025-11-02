@@ -2,11 +2,12 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
+import 'package:open_filex/open_filex.dart';
+import 'package:share_plus/share_plus.dart';
 import '../services/folder_picker_service.dart';
 import '../services/compression_service.dart';
 
-/// Enhanced File Explorer - iOS Files App Style + Smart Import
-/// No file_picker dependency - uses native iOS picker through FolderPickerService
+/// Enhanced File Explorer - Full Browse + File Opening + Smart Import
 class FileExplorerScreen extends StatefulWidget {
   const FileExplorerScreen({Key? key}) : super(key: key);
 
@@ -15,7 +16,7 @@ class FileExplorerScreen extends StatefulWidget {
 }
 
 class _FileExplorerScreenState extends State<FileExplorerScreen> {
-  String _currentView = 'browse'; // 'browse' or 'imports'
+  String _currentView = 'browse';
   List<FileSystemEntity> _importedFiles = [];
   bool _isLoading = false;
   Directory? _currentDirectory;
@@ -114,14 +115,453 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     }
   }
 
+  Future<void> _browseDeviceFiles(String location) async {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.folder_open, color: Colors.blue, size: 28),
+            SizedBox(width: 12),
+            Expanded(child: Text('Browse $location')),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'iOS file picker will open.',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+              ),
+              SizedBox(height: 12),
+              Text(
+                'You can:',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 8),
+              _buildBrowseStep('📁 Browse all locations'),
+              _buildBrowseStep('👀 Select files to view'),
+              _buildBrowseStep('📂 Navigate folders'),
+              _buildBrowseStep('🔍 See file details'),
+              SizedBox(height: 16),
+              Container(
+                padding: EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue.shade300),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline, color: Colors.blue.shade700, size: 24),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Select a file to see options including Open and Share!',
+                        style: TextStyle(
+                          color: Colors.blue.shade900,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _openBrowsePicker();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue,
+              padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            ),
+            child: Text('Open Browser', style: TextStyle(fontSize: 16)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBrowseStep(String text) {
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Icon(Icons.check_circle, color: Colors.green, size: 20),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(text, style: TextStyle(fontSize: 14)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openBrowsePicker() async {
+    try {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => WillPopScope(
+          onWillPop: () async => false,
+          child: AlertDialog(
+            content: Row(
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(width: 20),
+                Expanded(child: Text('Opening browser...')),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      await Future.delayed(Duration(milliseconds: 300));
+
+      final folderResult = await FolderPickerService.pickFolder();
+
+      if (mounted) Navigator.pop(context);
+
+      if (folderResult != null) {
+        final folderPath = folderResult['path']!;
+        final folderName = folderResult['name']!;
+        
+        // Check if it's a file or folder
+        final entity = FileSystemEntity.typeSync(folderPath);
+        if (entity == FileSystemEntityType.file) {
+          // It's a file - show file options
+          final file = File(folderPath);
+          _showFileOptionsDialog(file);
+        } else {
+          // It's a folder - show folder info
+          _showBrowseResultDialog(folderName, folderPath);
+        }
+      }
+    } catch (e) {
+      if (mounted) Navigator.pop(context);
+      _showError('Failed to open browser: $e');
+    }
+  }
+
+  void _showBrowseResultDialog(String folderName, String folderPath) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.folder, color: Colors.blue, size: 28),
+            SizedBox(width: 12),
+            Expanded(child: Text('Folder Selected')),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '📁 $folderName',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 12),
+            Text(
+              '📍 Path:',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+            ),
+            SizedBox(height: 4),
+            Text(
+              folderPath,
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+            ),
+            SizedBox(height: 16),
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.green.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.green.shade300),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '💡 Want to import this folder?',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.green.shade900,
+                    ),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Use the green + button for Smart Folder Import!',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.green.shade800,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _onItemTap(FileSystemEntity item) {
     if (item is Directory) {
       _loadDirectory(item);
     } else if (item is File) {
-      final fileName = path.basename(item.path);
-      final fileSize = item.lengthSync();
-      final fileExt = path.extension(item.path);
-      _showFileInfoDialog(fileName, fileSize, item.path, fileExt);
+      _showFileOptionsDialog(item);
+    }
+  }
+
+  Future<void> _showFileOptionsDialog(File file) async {
+    final fileName = path.basename(file.path);
+    final fileSize = file.lengthSync();
+    final fileExt = path.extension(file.path);
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(_getFileIcon(file.path), color: _getFileColor(file.path), size: 32),
+            SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                fileName,
+                style: TextStyle(fontSize: 16),
+              ),
+            ),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildFileInfoRow(Icons.straighten, 'Size', _formatBytes(fileSize)),
+              SizedBox(height: 8),
+              _buildFileInfoRow(Icons.description, 'Type', fileExt.isNotEmpty ? fileExt : 'Unknown'),
+              SizedBox(height: 8),
+              _buildFileInfoRow(Icons.location_on, 'Location', path.dirname(file.path)),
+              SizedBox(height: 16),
+              Container(
+                padding: EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue.shade300),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Available Actions:',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.blue.shade900,
+                        fontSize: 14,
+                      ),
+                    ),
+                    SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Icon(Icons.open_in_new, size: 16, color: Colors.blue.shade700),
+                        SizedBox(width: 4),
+                        Text('Open with default app', style: TextStyle(fontSize: 12)),
+                      ],
+                    ),
+                    SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Icon(Icons.share, size: 16, color: Colors.blue.shade700),
+                        SizedBox(width: 4),
+                        Text('Share with other apps', style: TextStyle(fontSize: 12)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Close'),
+          ),
+          TextButton.icon(
+            onPressed: () {
+              Navigator.pop(context);
+              _shareFile(file);
+            },
+            icon: Icon(Icons.share),
+            label: Text('Share'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(context);
+              _openFile(file);
+            },
+            icon: Icon(Icons.open_in_new),
+            label: Text('Open'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFileInfoRow(IconData icon, String label, String value) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 20, color: Colors.grey.shade600),
+        SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey.shade600,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              SizedBox(height: 2),
+              Text(
+                value,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _openFile(File file) async {
+    try {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => Center(
+          child: Card(
+            child: Padding(
+              padding: EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Opening file...'),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await Future.delayed(Duration(milliseconds: 500));
+
+      final result = await OpenFilex.open(file.path);
+
+      if (mounted) Navigator.pop(context);
+
+      if (result.type != ResultType.done) {
+        String message = 'Could not open file';
+        
+        switch (result.type) {
+          case ResultType.noAppToOpen:
+            message = 'No app installed to open this file type';
+            break;
+          case ResultType.fileNotFound:
+            message = 'File not found';
+            break;
+          case ResultType.permissionDenied:
+            message = 'Permission denied';
+            break;
+          case ResultType.error:
+            message = 'Error opening file: ${result.message}';
+            break;
+          default:
+            message = 'Could not open file';
+        }
+
+        _showError(message);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  Icon(Icons.check_circle, color: Colors.white),
+                  SizedBox(width: 8),
+                  Expanded(child: Text('File opened successfully!')),
+                ],
+              ),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) Navigator.pop(context);
+      _showError('Failed to open file: $e');
+    }
+  }
+
+  Future<void> _shareFile(File file) async {
+    try {
+      final result = await Share.shareXFiles(
+        [XFile(file.path)],
+        text: 'Sharing ${path.basename(file.path)}',
+      );
+
+      if (result.status == ShareResultStatus.success) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  Icon(Icons.check_circle, color: Colors.white),
+                  SizedBox(width: 8),
+                  Text('File shared successfully!'),
+                ],
+              ),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      _showError('Failed to share file: $e');
     }
   }
 
@@ -142,7 +582,7 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'How it works:',
+                'Import & compress folders:',
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
               ),
               SizedBox(height: 12),
@@ -378,46 +818,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     }
   }
 
-  void _showFileInfoDialog(String fileName, int fileSize, String filePath, String fileExt) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(_getFileIcon(fileName), color: Colors.blue),
-            SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                fileName,
-                style: TextStyle(fontSize: 16),
-              ),
-            ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('📦 Size: ${_formatBytes(fileSize)}'),
-            SizedBox(height: 8),
-            Text('📄 Type: $fileExt'),
-            SizedBox(height: 8),
-            Text(
-              '📍 Path: $filePath',
-              style: TextStyle(fontSize: 10, color: Colors.grey),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
-
   void _showError(String message) {
     if (!mounted) return;
     
@@ -425,6 +825,7 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
       SnackBar(
         content: Text(message),
         backgroundColor: Colors.red,
+        duration: Duration(seconds: 4),
       ),
     );
   }
@@ -535,21 +936,21 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         _buildSectionHeader('Locations'),
         _buildLocationTile(
           'iCloud Drive',
-          'Access your iCloud files',
+          'Browse your iCloud files',
           Icons.cloud,
           Colors.blue,
-          () => _showError('Use Smart Folder Import (+ button) to access iCloud files'),
+          () => _browseDeviceFiles('iCloud Drive'),
         ),
         _buildLocationTile(
           'On My iPhone',
-          'Files stored on this device',
+          'Browse files stored on this device',
           Icons.phone_iphone,
           Colors.blue,
-          () => _showError('Use Smart Folder Import (+ button) to access device files'),
+          () => _browseDeviceFiles('On My iPhone'),
         ),
         _buildLocationTile(
           'Documents',
-          'App documents folder',
+          'Browse app documents folder',
           Icons.description,
           Colors.blue,
           () async {
@@ -561,10 +962,10 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         _buildSectionHeader('Favourites'),
         _buildLocationTile(
           'Downloads',
-          'Downloaded files',
+          'Browse downloaded files',
           Icons.download,
           Colors.blue,
-          () => _showError('Use Smart Folder Import (+ button) to access downloads'),
+          () => _browseDeviceFiles('Downloads'),
         ),
         SizedBox(height: 16),
         _buildSectionHeader('My Imports'),
@@ -650,7 +1051,7 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
                               ? Text(_formatBytes(item.lengthSync()))
                               : null,
                           trailing: Icon(
-                            isDirectory ? Icons.chevron_right : Icons.info_outline,
+                            isDirectory ? Icons.chevron_right : Icons.more_vert,
                             color: Colors.grey,
                           ),
                           onTap: () => _onItemTap(item),
@@ -716,13 +1117,8 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
                           leading: Icon(Icons.folder_zip, size: 40, color: Colors.green),
                           title: Text(fileName, style: TextStyle(fontWeight: FontWeight.w500)),
                           subtitle: Text(_formatBytes(fileSize)),
-                          trailing: Icon(Icons.info_outline, color: Colors.grey),
-                          onTap: () => _showFileInfoDialog(
-                            fileName,
-                            fileSize,
-                            file.path,
-                            path.extension(file.path),
-                          ),
+                          trailing: Icon(Icons.more_vert, color: Colors.grey),
+                          onTap: () => _showFileOptionsDialog(file),
                         );
                       },
                     ),
