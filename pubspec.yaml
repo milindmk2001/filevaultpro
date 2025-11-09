@@ -1,31 +1,66 @@
-name: file_vault_pro
-description: "A comprehensive file management and security app for iOS"
-publish_to: 'none'
+name: filevaultpro
+description: A secure file vault application with storage analytics and compression
 
-version: 1.0.0+25
+# IMPORTANT: Increment the build number (+1) each time you deploy
+# Example: 1.0.0+26 → 1.0.0+27 → 1.0.0+28
+version: 1.0.0+27
 
 environment:
-  sdk: ^3.6.0
+  sdk: '>=3.0.0 <4.0.0'
 
 dependencies:
   flutter:
     sdk: flutter
 
-  cupertino_icons: ^1.0.8
-  provider: ^6.1.2
-  open_filex: ^4.3.4
-  share_plus: ^7.2.1
-  path_provider: ^2.1.1
-  fl_chart: ^1.1.1
-  percent_indicator: ^4.2.3
-  image_picker: ^1.1.2
-  photo_manager: ^3.5.2
-  archive: ^4.0.7
-  path: ^1.9.0
+  # UI Components
+  cupertino_icons: ^1.0.6
+
+  # File & Storage Management
+  path_provider: ^2.1.1          # Get device storage paths
+  path: ^1.9.0                   # Path manipulation utilities
+  file_picker: ^6.1.1            # File picker (if used)
+  
+  # File Operations
+  open_filex: ^4.3.4             # Open files with native apps
+  share_plus: ^7.2.1             # Share files
+  
+  # Storage & Compression
+  archive: ^3.4.9                # Zip compression (if used in Dart)
+  
+  # NEW: Dashboard with Tabs Dependencies
+  fl_chart: ^0.65.0              # Beautiful interactive charts
+  disk_space: ^0.2.1             # Get device storage info
+  intl: ^0.18.1                  # Date formatting and internationalization
+  
+  # State Management (if using)
+  # provider: ^6.1.1             # Uncomment if you use Provider
+  
+  # Networking (if needed)
+  # http: ^1.1.0                 # Uncomment if you make API calls
+  
+  # Local Storage (if needed)
+  # shared_preferences: ^2.2.2   # Uncomment if you use SharedPreferences
+  # sqflite: ^2.3.0              # Uncomment if you use SQLite
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^6.0.0
 
+  flutter_lints: ^3.0.0          # Recommended lints for Flutter
+
+# Flutter configuration
 flutter:
   uses-material-design: true
+
+  # App Icons
+  # assets:
+  #   - assets/images/
+  #   - assets/icons/
+  
+  # If you have custom fonts, uncomment and configure:
+  # fonts:
+  #   - family: CustomFont
+  #     fonts:
+  #       - asset: fonts/CustomFont-Regular.ttf
+  #       - asset: fonts/CustomFont-Bold.ttf
+  #         weight: 700

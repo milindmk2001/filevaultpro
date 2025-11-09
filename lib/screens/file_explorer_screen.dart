@@ -6,6 +6,8 @@ import 'package:open_filex/open_filex.dart';
 import 'package:share_plus/share_plus.dart';
 import '../services/folder_picker_service.dart';
 import '../services/compression_service.dart';
+import '../services/metadata_service.dart';
+import '../utils/source_classifier.dart';
 
 /// Enhanced File Explorer - Full Browse + File Opening + Smart Import
 /// Fixed: Copies files to temp before opening (iOS security)
@@ -845,6 +847,21 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
       if (compressionResult['success'] == true) {
         final fileSize = compressionResult['size'] as int;
         final fileSizeMB = (fileSize / (1024 * 1024)).toStringAsFixed(2);
+        // Detect source and save metadata
+        final source = SourceClassifier.detectSource(folderPath);
+        final detailedSource = SourceClassifier.getDetailedSource(folderPath);
+
+        final metadata = FileMetadata(
+          fileName: zipFileName,
+          source: source,
+          detailedSource: detailedSource,
+          size: fileSize,
+          importedAt: DateTime.now(),
+          originalPath: folderPath,
+        );
+
+        await MetadataService.saveMetadata(metadata);
+
 
         await _loadImportedFiles();
         _switchToImportsMode();
