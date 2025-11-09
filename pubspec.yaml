@@ -3,7 +3,7 @@ description: A secure file vault application with storage analytics and compress
 
 # IMPORTANT: Increment the build number (+1) each time you deploy
 # Example: 1.0.0+26 → 1.0.0+27 → 1.0.0+28
-version: 1.0.0+27
+version: 1.0.0+28
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -29,7 +29,6 @@ dependencies:
   
   # NEW: Dashboard with Tabs Dependencies
   fl_chart: ^0.65.0              # Beautiful interactive charts
-  disk_space: ^0.2.1             # Get device storage info
   intl: ^0.18.1                  # Date formatting and internationalization
   
   # State Management (if using)
